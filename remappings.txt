@@ -1,0 +1,3 @@
+@openzeppelin/contracts/=lib/openzeppelin-contracts/contracts/
+@kleros/erc-792/contracts/=lib/erc-792/contracts/
+forge-std/=lib/forge-std/src/
