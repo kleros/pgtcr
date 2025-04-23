@@ -186,6 +186,12 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     );
 
     /**
+     * @dev Emitted when any settings are updated, to make subgraph index the changes.
+     *  Not emitted whenever MetaEvidence is also emitted.
+     */
+     event SettingsUpdated();
+
+    /**
      * @dev Initialize the arbitrable curated registry.
      * @param _arbitrator Arbitrator to resolve potential disputes. The arbitrator is trusted to support appeal periods and not reenter.
      * @param _arbitratorExtraData Extra data for the trusted arbitrator contract.
@@ -588,6 +594,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeSubmissionPeriod(uint256 _submissionPeriod) external onlyGovernor {
         submissionPeriod = _submissionPeriod;
+        emit SettingsUpdated();
     }
 
     /**
@@ -596,6 +603,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeReinclusionPeriod(uint256 _reinclusionPeriod) external onlyGovernor {
         reinclusionPeriod = _reinclusionPeriod;
+        emit SettingsUpdated();
     }
 
     /**
@@ -605,6 +613,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     function changeWithdrawingPeriod(uint256 _withdrawingPeriod) external onlyGovernor {
         require(_withdrawingPeriod < arbitrationParamsCooldown / 2, "Withdraw period must be lower than half of cooldown");
         withdrawingPeriod = _withdrawingPeriod;
+        emit SettingsUpdated();
     }
 
     /**
@@ -613,6 +622,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeSubmissionMinDeposit(uint256 _submissionMinDeposit) external onlyGovernor {
         submissionMinDeposit = _submissionMinDeposit;
+        emit SettingsUpdated();
     }
 
     /**
@@ -621,6 +631,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeGovernor(address _governor) external onlyGovernor {
         governor = _governor;
+        emit SettingsUpdated();
     }
     
     /**
@@ -629,6 +640,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeChallengeStakeMultiplier(uint256 _challengeStakeMultiplier) external onlyGovernor {
         challengeStakeMultiplier = _challengeStakeMultiplier;
+        emit SettingsUpdated();
     }
 
     /**
@@ -637,6 +649,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeSharedStakeMultiplier(uint256 _sharedStakeMultiplier) external onlyGovernor {
         sharedStakeMultiplier = _sharedStakeMultiplier;
+        emit SettingsUpdated();
     }
 
     /**
@@ -645,6 +658,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeWinnerStakeMultiplier(uint256 _winnerStakeMultiplier) external onlyGovernor {
         winnerStakeMultiplier = _winnerStakeMultiplier;
+        emit SettingsUpdated();
     }
 
     /**
@@ -653,6 +667,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function changeLoserStakeMultiplier(uint256 _loserStakeMultiplier) external onlyGovernor {
         loserStakeMultiplier = _loserStakeMultiplier;
+        emit SettingsUpdated();
     }
 
     /**
