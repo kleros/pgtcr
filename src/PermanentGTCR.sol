@@ -530,6 +530,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         if (request.ruling == Party.None) {
             // If the arbitrator refuse to rule, then the item status should be the same it was before the request.
             item.status = Status.Reincluded;
+            item.includedAt = uint48(block.timestamp);
             // For the item to remain included, the deposit reserved for arbitration fees must remain.
             // But since the submitter did not win the dispute, the stake the challenger placed won't be added to the item.stake
             // The challenger will lose the arbFees, but will get their stake back.
@@ -543,6 +544,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             // Also, the request.stake is added to the item.stake, to raise the cost of future challenges.
             item.status = Status.Reincluded;
             item.stake = item.stake + request.stake;
+            item.includedAt = uint48(block.timestamp);
 
             // The submitter might have asked for a withdraw before the Dispute, or during the Dispute.
             // If that's the case, the item will be withdrawn.
