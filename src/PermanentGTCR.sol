@@ -528,17 +528,19 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         request.ruling = Party(finalRuling);
 
         if (request.ruling == Party.None) {
-            // If the arbitrator refuse to rule, then the item status should be the same it was before the request.
-            item.status = Status.Reincluded;
-            item.includedAt = uint48(block.timestamp);
-            // For the item to remain included, the deposit reserved for arbitration fees must remain.
-            // But since the submitter did not win the dispute, the stake the challenger placed won't be added to the item.stake
-            // The challenger will lose the arbFees, but will get their stake back.
-            try token.transfer(request.challenger, request.stake) {} catch {}
+            // If the Arbitrator refuses to rule:
+            // - Either this Registry was using a Policy that the Arbitrator will always refuse (we don't care).
+            // - Or the Registry behaved, but the Arbitrator misbehaved. We will asume this.
+            // Since RtA is not a normal ruling, to minimize damage to both parties, split the cost of arb
+            // among Submitter and Challenger. This means the item is no longer collateralized, so remove it.
+            // Submitter and Challenger deposit will be returned to each respective party.
 
-            // The submitter might have asked for a withdraw before the Dispute, or during the Dispute.
-            // If that's the case, the item will be withdrawn.
-            if (item.withdrawingTimestamp > 0) _doWithdrawItem(itemID);
+            // Refunding for challenger
+            item.arbitrationDeposit = item.arbitrationDeposit / 2; // if odd, 1 wei will stay in contract
+            request.challenger.send(item.arbitrationDeposit);
+            try token.transfer(request.challenger, request.stake) {} catch {}
+            // Refunding for submitter and removing the Item
+            _doWithdrawItem(itemID);
         } else if (request.ruling == Party.Submitter) {
             // If the arbitrator asserts item correctness, the item is reincluded.
             // Also, the request.stake is added to the item.stake, to raise the cost of future challenges.
