@@ -51,6 +51,7 @@ contract PermanentGTCRFactory {
      * - The multiplier applied to the winner's fee stake for the subsequent round.
      * - The multiplier applied to the loser's fee stake for the subsequent round.
      * - The multiplier applied to the item's token stake to obtain the required challenge deposit.
+     * @return instance Address the instance was deployed at.
      */
     function deploy(
         IArbitrator _arbitrator,
@@ -61,8 +62,8 @@ contract PermanentGTCRFactory {
         uint256 _submissionMinDeposit,
         uint256[4] calldata _periods,
         uint256[4] calldata _stakeMultipliers
-    ) public {
-        PermanentGTCR instance = clone(GTCR);
+    ) public returns (PermanentGTCR instance) {
+        instance = clone(GTCR);
 
         instance.initialize(
             _arbitrator,
