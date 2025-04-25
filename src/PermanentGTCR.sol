@@ -336,7 +336,10 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         Item storage item = items[_itemID];
         require(item.status == Status.Submitted || item.status == Status.Reincluded, "The item must be collateralized and not disputed.");
 
-        require(block.timestamp >= item.withdrawingTimestamp + withdrawingPeriod, "Withdrawal is pending execution");
+        require(
+            item.withdrawingTimestamp == 0 || block.timestamp < item.withdrawingTimestamp + withdrawingPeriod,
+            "Withdrawal is pending execution"
+        );
 
         uint256 challengeStake = item.stake * challengeStakeMultiplier / MULTIPLIER_DIVISOR;
         require(token.transferFrom(msg.sender, address(this), challengeStake), "You need to fund the challengeStake");
