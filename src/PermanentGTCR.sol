@@ -317,6 +317,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             && block.timestamp >= item.withdrawingTimestamp + withdrawingPeriod,
             "Item is not included or not enough time has passed"
         );
+        require(item.withdrawingTimestamp > 0, "Withdrawing did not start");
 
         _doWithdrawItem(_itemID);
         emit ItemStatusChange(_itemID);
