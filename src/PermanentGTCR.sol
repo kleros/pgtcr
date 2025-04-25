@@ -465,7 +465,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         // If item.status is Disputed, that means latest Request is still an ongoing dispute.
         require(
-            !(item.requestCount - 1 == _requestID && item.status != Status.Disputed),
+            !(item.requestCount - 1 == _requestID && item.status == Status.Disputed),
             "Cannot withdraw contribution from active Dispute"
         );
 
