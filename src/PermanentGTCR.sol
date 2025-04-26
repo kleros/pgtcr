@@ -126,7 +126,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     /* Modifiers */
 
     modifier onlyGovernor() {
-        require(msg.sender == governor, "The caller must be the governor.");
+        if (msg.sender != governor) revert GovernorOnly();
         _;
     }
 
@@ -220,8 +220,8 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         uint256[4] calldata _periods,
         uint256[4] calldata _stakeMultipliers
     ) external {
-        require(!initialized, "Already initialized.");
-        require(_periods[2] < _periods[3] / 2, "Withdraw period must be lower than half of cooldown");
+        if (initialized) revert AlreadyInitialized();
+        if (_periods[2] >= _periods[3]  / 2) revert WithdrawalPeriodExceedsLimit();
         arbitrator = _arbitrator;
         governor = _governor;
         token = _token;
@@ -256,21 +256,21 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     function addItem(string calldata _item, uint256 _deposit) external payable {
         bytes32 itemID = keccak256(abi.encodePacked(_item));
         Item storage item = items[itemID];
-        require(item.status == Status.Absent, "Item must be absent to be added.");
+        if (item.status != Status.Absent) revert ItemWrongStatus();
 
         // In case item had been included before being Absent, NewItem is not emitted again.
         if (item.includedAt == 0) {
             emit NewItem(itemID, _item);
         }
 
-        require(_deposit >= submissionMinDeposit, "You must match or overpass the minimum deposit.");
-        require(token.transferFrom(msg.sender, address(this), _deposit));
+        if (_deposit < submissionMinDeposit) revert BelowDeposit();
+        if(!token.transferFrom(msg.sender, address(this), _deposit)) revert BelowDeposit();
 
         uint256 arbitrationParamsIndex = arbitrationParamsChanges.length - 1;
         bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitratorExtraData);
-        require(msg.value >= arbitrationCost, "You must fully fund the arbitration fees.");
+        if (msg.value < arbitrationCost) revert BelowArbitrationDeposit();
 
         // When items are Absent as a result of getting manually withdrawn or removed via dispute,
         // all other fields remained, but they will be overwritten here, with the exception of item.requestCount
@@ -296,9 +296,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         // Can be done when Submitted, Reincluded, and Disputed.
         // Absent items don't really matter, but require is down here for correctness.
-        require(item.status != Status.Absent, "Item is already absent");
-        require(msg.sender == item.submitter, "You need to be the submitter of the item");
-        require(item.withdrawingTimestamp == 0, "Withdrawing process already started");
+        if (item.status == Status.Absent) revert ItemWrongStatus();
+        if (item.submitter != msg.sender) revert SubmitterOnly();
+        if (item.withdrawingTimestamp > 0) revert ItemWithdrawingAlready();
         
         item.withdrawingTimestamp = uint48(block.timestamp);
         emit ItemStartsWithdrawing(_itemID);
@@ -312,12 +312,11 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     function withdrawItem(bytes32 _itemID) external payable {
         Item storage item = items[_itemID];
 
-        require(
-            (item.status == Status.Submitted || item.status == Status.Reincluded)
-            && block.timestamp >= item.withdrawingTimestamp + withdrawingPeriod,
-            "Item is not included or not enough time has passed"
-        );
-        require(item.withdrawingTimestamp > 0, "Withdrawing did not start");
+        if (item.status == Status.Absent || item.status == Status.Disputed) revert ItemWrongStatus();
+        if (
+            item.withdrawingTimestamp == 0
+            || block.timestamp < item.withdrawingTimestamp + withdrawingPeriod
+        ) revert ItemWithdrawingNotYet();
 
         _doWithdrawItem(_itemID);
         emit ItemStatusChange(_itemID);
@@ -334,15 +333,15 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function challengeItem(bytes32 _itemID, string calldata _evidence) external payable {
         Item storage item = items[_itemID];
-        require(item.status == Status.Submitted || item.status == Status.Reincluded, "The item must be collateralized and not disputed.");
+        if (item.status == Status.Absent || item.status == Status.Disputed) revert ItemWrongStatus();
 
-        require(
-            item.withdrawingTimestamp == 0 || block.timestamp < item.withdrawingTimestamp + withdrawingPeriod,
-            "Withdrawal is pending execution"
-        );
+        if (
+            item.withdrawingTimestamp > 0
+            && block.timestamp >= item.withdrawingTimestamp + withdrawingPeriod
+        ) revert ItemWrongStatus(); // Canonically withdrawn, just pending execution 
 
         uint256 challengeStake = item.stake * challengeStakeMultiplier / MULTIPLIER_DIVISOR;
-        require(token.transferFrom(msg.sender, address(this), challengeStake), "You need to fund the challengeStake");
+        if (!token.transferFrom(msg.sender, address(this), challengeStake)) revert BelowDeposit();
 
         Request storage request = item.requests[item.requestCount++];
         request.challenger = payable(msg.sender);
@@ -365,7 +364,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitrationParams.arbitratorExtraData);
 
-        require(msg.value >= arbitrationCost, "You must fully fund the challenge.");
+        if (msg.value < arbitrationCost) revert BelowArbitrationDeposit();
 
         // Raise a dispute.
         request.disputeID = arbitrator.createDispute{value: arbitrationCost}(
@@ -396,10 +395,10 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @param _side The recipient of the contribution.
      */
     function fundAppeal(bytes32 _itemID, Party _side) external payable {
-        require(_side > Party.None, "Invalid side.");
+        if (_side == Party.None) revert AppealNotRtA();
 
         Item storage item = items[_itemID];
-        require(item.status == Status.Disputed, "The item must be disputed.");
+        if (item.status != Status.Disputed) revert ItemWrongStatus();
 
         uint256 lastRequestIndex = item.requestCount - 1;
         Request storage request = item.requests[lastRequestIndex];
@@ -408,15 +407,12 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         uint256 lastRoundIndex = request.roundCount - 1;
         Round storage round = request.rounds[lastRoundIndex];
-        require(round.sideFunded != _side, "Side already fully funded.");
+        if (round.sideFunded == _side) revert AppealAlreadyFunded();
 
         uint256 multiplier;
         {
             (uint256 appealPeriodStart, uint256 appealPeriodEnd) = arbitrator.appealPeriod(request.disputeID);
-            require(
-                block.timestamp >= appealPeriodStart && block.timestamp < appealPeriodEnd,
-                "Contributions must be made within the appeal period."
-            );
+            if (!(block.timestamp >= appealPeriodStart && block.timestamp < appealPeriodEnd)) revert AppealNotWithinPeriod();
 
             Party winner = Party(arbitrator.currentRuling(request.disputeID));
             if (winner == Party.None) {
@@ -425,10 +421,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
                 multiplier = winnerStakeMultiplier;
             } else {
                 multiplier = loserStakeMultiplier;
-                require(
-                    block.timestamp < (appealPeriodStart + appealPeriodEnd) / 2,
-                    "The loser must contribute during the first half of the appeal period."
-                );
+                if(!(block.timestamp < (appealPeriodStart + appealPeriodEnd) / 2)) revert AppealNotWithinPeriod();
             }
         }
 
@@ -467,10 +460,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         Item storage item = items[_itemID];
 
         // If item.status is Disputed, that means latest Request is still an ongoing dispute.
-        require(
-            !(item.requestCount - 1 == _requestID && item.status == Status.Disputed),
-            "Cannot withdraw contribution from active Dispute"
-        );
+        if (item.requestCount - 1 == _requestID && item.status == Status.Disputed) revert RewardsPendingDispute();
 
         Request storage request = item.requests[_requestID];
         Round storage round = request.rounds[_roundID];
@@ -510,12 +500,12 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @param _ruling Ruling given by the arbitrator. Note that 0 is reserved for "Refused to arbitrate".
      */
     function rule(uint256 _disputeID, uint256 _ruling) external {
-        require(_ruling <= RULING_OPTIONS, "Invalid ruling option");
-        require(address(arbitrator) == msg.sender, "Only the arbitrator can give a ruling");
+        if (_ruling > RULING_OPTIONS) revert RulingInvalidOption();
+        if (address(arbitrator) != msg.sender) revert ArbitratorOnly();
 
         bytes32 itemID = disputeIDToItemID[_disputeID];
         Item storage item = items[itemID];
-        require(item.status == Status.Disputed, "The item must still be disputed");
+        if (item.status != Status.Disputed) revert ItemWrongStatus();
         uint256 lastRequestIndex = item.requestCount - 1;
         Request storage request = item.requests[lastRequestIndex];
 
@@ -583,7 +573,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
     function submitEvidence(bytes32 _itemID, string calldata _evidence) external {
         Item storage item = items[_itemID];
-        require(item.status != Status.Absent, "Item is not included");
+        if (item.status == Status.Absent) revert ItemWrongStatus();
 
         emit Evidence(arbitrator, uint256(_itemID), msg.sender, _evidence);
     }
@@ -615,7 +605,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @param _withdrawingPeriod The new duration of the withdrawing period.
      */
     function changeWithdrawingPeriod(uint256 _withdrawingPeriod) external onlyGovernor {
-        require(_withdrawingPeriod < arbitrationParamsCooldown / 2, "Withdraw period must be lower than half of cooldown");
+        if (_withdrawingPeriod >= arbitrationParamsCooldown / 2) revert WithdrawalPeriodExceedsLimit();
         withdrawingPeriod = _withdrawingPeriod;
         emit SettingsUpdated();
     }
@@ -771,4 +761,22 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             emit Contribution(_itemID, _requestID, _roundID, _contributor, contribution, Party(_side));
         }
     }
+
+    /* Errors */
+
+    error AlreadyInitialized();
+    error GovernorOnly();
+    error SubmitterOnly();
+    error ArbitratorOnly();
+    error WithdrawalPeriodExceedsLimit();
+    error ItemWrongStatus();
+    error BelowDeposit();
+    error BelowArbitrationDeposit();
+    error ItemWithdrawingAlready();
+    error ItemWithdrawingNotYet();
+    error AppealNotRtA();
+    error AppealAlreadyFunded();
+    error AppealNotWithinPeriod();
+    error RewardsPendingDispute();
+    error RulingInvalidOption();
 }
