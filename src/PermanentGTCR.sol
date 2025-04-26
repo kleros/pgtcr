@@ -221,7 +221,6 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         uint256[4] calldata _stakeMultipliers
     ) external {
         if (initialized) revert AlreadyInitialized();
-        if (_periods[2] >= _periods[3]  / 2) revert WithdrawalPeriodExceedsLimit();
         arbitrator = _arbitrator;
         governor = _governor;
         token = _token;
@@ -353,8 +352,11 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         // The settings in use will be the latest settings such that: pass the cooldown period OR item was included after.
         // The first arbitrationParams always contains timestamp = 0.
         for (uint256 i = arbitrationParamsChanges.length - 1; i >= 0; i--) {
-            uint48 timestamp = arbitrationParamsChanges[i].timestamp;
-            if (block.timestamp - arbitrationParamsCooldown >= timestamp || item.includedAt >= timestamp) {
+            uint48 settingsTimestamp = arbitrationParamsChanges[i].timestamp;
+            // If an item initiated withdrawal, then the settings that will adjudicate that item are frozen.
+            // If the item is not withdrawing, then this reference point is the current time.
+            uint256 epochTimestamp = item.withdrawingTimestamp > 0 ? item.withdrawingTimestamp : block.timestamp;
+            if (epochTimestamp - arbitrationParamsCooldown >= settingsTimestamp || item.includedAt >= settingsTimestamp) {
                 request.arbitrationParamsIndex = uint96(i);
                 break;
             }
@@ -605,7 +607,6 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @param _withdrawingPeriod The new duration of the withdrawing period.
      */
     function changeWithdrawingPeriod(uint256 _withdrawingPeriod) external onlyGovernor {
-        if (_withdrawingPeriod >= arbitrationParamsCooldown / 2) revert WithdrawalPeriodExceedsLimit();
         withdrawingPeriod = _withdrawingPeriod;
         emit SettingsUpdated();
     }
@@ -768,7 +769,6 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     error GovernorOnly();
     error SubmitterOnly();
     error ArbitratorOnly();
-    error WithdrawalPeriodExceedsLimit();
     error ItemWrongStatus();
     error BelowDeposit();
     error BelowArbitrationDeposit();
