@@ -260,6 +260,8 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         // In case item had been included before being Absent, NewItem is not emitted again.
         if (item.includedAt == 0) {
             emit NewItem(itemID, _item);
+        } else {
+            emit ItemStatusChange(itemID);
         }
 
         if (_deposit < submissionMinDeposit) revert BelowDeposit();
