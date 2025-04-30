@@ -471,7 +471,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         Request storage request = requests[_itemID][_requestID];
         Round storage round = rounds[_itemID][_requestID][_roundID];
-        uint256[3] storage contributions = contributions[_itemID][_requestID][_roundID][_beneficiary]; // todo hope this shit works
+        uint256[3] storage contributions = contributions[_itemID][_requestID][_roundID][_beneficiary];
         uint256 reward;
         if (_roundID == request.roundCount - 1) {
             // Reimburse if not enough fees were raised to appeal the ruling.
@@ -576,7 +576,6 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @param _itemID The ID of the item which the evidence is related to.
      * @param _evidence A link to an evidence using its URI.
      */
-
     function submitEvidence(bytes32 _itemID, string calldata _evidence) external {
         if (items[_itemID].status == Status.Absent) revert ItemWrongStatus();
 
