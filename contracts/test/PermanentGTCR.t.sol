@@ -128,13 +128,13 @@ contract AddItem is PGTCRTest {
     vm.stopPrank();
 
     // Ensure data was written and returns as expected
-    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 requestCount,
+    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
     address submitter, uint48 includedAt, uint48 withdrawingTimestamp,
     uint256 stake) = pgtcr.items(keccak256(abi.encodePacked("item1")));
 
     vm.assertEq(uint8(status), 1);
     vm.assertEq(arbitrationDeposit, uint128(arbDeposit));
-    vm.assertEq(requestCount, 0);
+    vm.assertEq(challengeCount, 0);
     vm.assertEq(submitter, alice);
     vm.assertEq(includedAt, uint48(block.timestamp));
     vm.assertEq(withdrawingTimestamp, 0);
@@ -529,7 +529,7 @@ contract ChallengeItem is PGTCRTest {
     pgtcr.challengeItem{value: arbCost}(itemID, "");
     vm.stopPrank();
 
-    (uint80 arbIndex, , , , ,) = pgtcr.requests(itemID, 0);
+    (uint80 arbIndex, , , , ,) = pgtcr.challenges(itemID, 0);
     assertEq(arbIndex, 1);
 
     // create a new different dispute. since item was included after last change, must have settings ID 2
@@ -549,7 +549,7 @@ contract ChallengeItem is PGTCRTest {
       uint256(itemID2)
     );
     pgtcr.challengeItem{value: arbCost}(itemID2, "");
-    (uint80 arbIndex2, , , , ,) = pgtcr.requests(itemID2, 0);
+    (uint80 arbIndex2, , , , ,) = pgtcr.challenges(itemID2, 0);
     assertEq(arbIndex2, 2);
   }
 }
@@ -613,13 +613,13 @@ contract AppealRuleAndContribs is PGTCRTest {
     emit PermanentGTCR.ItemStatusChange(itemID);
     arbitrator.executeRuling(0);
     // item was "Reincluded"
-    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 requestCount,
+    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
     address submitter, uint48 includedAt, uint48 withdrawingTimestamp,
     uint256 stake) = pgtcr.items(itemID);
 
     vm.assertEq(uint8(status), 2); // Reincluded
     vm.assertEq(arbitrationDeposit, uint128(arbCost));
-    vm.assertEq(requestCount, 1);
+    vm.assertEq(challengeCount, 1);
     vm.assertEq(submitter, alice);
     vm.assertEq(includedAt, uint48(block.timestamp));
     vm.assertEq(withdrawingTimestamp, 0);
@@ -646,16 +646,16 @@ contract AppealRuleAndContribs is PGTCRTest {
     emit PermanentGTCR.ItemStatusChange(itemID);
     arbitrator.executeRuling(0);
     // item was Withdrawn, so must be Absent
-    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 requestCount,
+    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
     address submitter, uint48 includedAt, uint48 withdrawingTimestamp,
     uint256 stake) = pgtcr.items(itemID);
 
-    // Even though item is now Absent, rest of values remain the same. except requestCount, they won't matter
+    // Even though item is now Absent, rest of values remain the same. except challengeCount, they won't matter
     // as e.g. amounts cannot be withdrawn any longer as item being Absent prevents it
     // if item becomes Submitted again, they'll get overwritten
     vm.assertEq(uint8(status), 0); // Absent
     vm.assertEq(arbitrationDeposit, uint128(arbCost));
-    vm.assertEq(requestCount, 1); // It's critical this value remains 1
+    vm.assertEq(challengeCount, 1); // It's critical this value remains 1
     vm.assertEq(submitter, alice);
     vm.assertEq(includedAt, uint48(block.timestamp)); // set before withdrawal was triggered
     vm.assertEq(withdrawingTimestamp, uint48(block.timestamp)); // is not reset unless addItem happens later
@@ -751,14 +751,14 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.expectEmit(true, false, false, false, address(pgtcr));
     emit PermanentGTCR.ItemStatusChange(itemID);
     arbitrator.executeRuling(0);
-    // item is now Absent, requestCount remains at 1, all other values don't matter
-    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 requestCount,
+    // item is now Absent, challengeCount remains at 1, all other values don't matter
+    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
     address submitter, uint48 includedAt, uint48 withdrawingTimestamp,
     uint256 stake) = pgtcr.items(itemID);
 
     vm.assertEq(uint8(status), 0); // Absent
     vm.assertEq(arbitrationDeposit, uint128(arbCost));
-    vm.assertEq(requestCount, 1);
+    vm.assertEq(challengeCount, 1);
     vm.assertEq(submitter, alice);
     vm.assertEq(includedAt, prevIncludedAt); // it was never overwritten, as would happen if rule = Party.Submitter
     vm.assertEq(withdrawingTimestamp, 0);
@@ -928,12 +928,12 @@ contract AppealRuleAndContribs is PGTCRTest {
     emit PermanentGTCR.ItemStatusChange(itemID);
     arbitrator.executeRuling(0);
     
-    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 requestCount,
+    (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
     address submitter, , , uint256 stake) = pgtcr.items(itemID);
 
     vm.assertEq(uint8(status), 0); // Absent
     vm.assertEq(arbitrationDeposit, uint128(arbCost) / 2); // in this case, half was awarded to Bob and substracted from this
-    vm.assertEq(requestCount, 1);
+    vm.assertEq(challengeCount, 1);
     vm.assertEq(submitter, alice);
     vm.assertEq(stake, submissionMinDeposit); // set before withdrawal was triggered
 

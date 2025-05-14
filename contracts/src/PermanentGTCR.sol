@@ -43,7 +43,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     }
 
     enum Party {
-        None, // Party per default when there is no challenger or requester. Also used for unconclusive ruling.
+        None, // Party per default when there is no challenger or submitter. Also used for unconclusive ruling.
         Submitter, // Party that included an item.
         Challenger // Party that challenges the inclusion of an item.
     }
@@ -53,15 +53,15 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     struct Item {
         Status status; // The current status of the item.
         uint128 arbitrationDeposit; // Pays for juror fees. Since juror fees can mutate, these are recorded per item.
-        uint120 requestCount; // The number of requests. Reminder, DO NOT DELETE this struct on removal, or this gets reset.
+        uint120 challengeCount; // The number of challenges. Reminder, DO NOT DELETE this struct on removal, or this gets reset.
         address payable submitter; // Party who submitted the item, and eligible for its stake when withdrawn.
         uint48 includedAt; // When item was last submitted, OR when was last asserted as correct by dispute.
         uint48 withdrawingTimestamp; // When submitter starts the withdrawal process.
         uint256 stake; // Awarded to successful challenger, or returned to submitter on withdrawal.
     }
 
-    struct Request {
-        uint80 arbitrationParamsIndex; // The index for the arbitration params for the request.
+    struct Challenge {
+        uint80 arbitrationParamsIndex; // The index for the arbitration params for the challenge.
         Party ruling; // The ruling given to a dispute. Only set after it has been resolved.
         uint8 roundCount; // The number of rounds.
         address payable challenger; // Address of the challenger, if any.
@@ -81,13 +81,13 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
     struct ArbitrationParams {
         uint48 timestamp; // When these settings were put onto place.
-        bytes arbitratorExtraData; // The extra data for the trusted arbitrator of this request.
+        bytes arbitratorExtraData; // The extra data for the trusted arbitrator of this challenge.
     }
 
     /* Constants */
 
     uint256 public constant RULING_OPTIONS = 2; // The amount of non 0 choices the arbitrator can give.
-    uint256 private constant RESERVED_ROUND_ID = 0; // For compatibility with GeneralizedTCR consider the request/challenge cycle the first round (index 0).
+    uint256 private constant RESERVED_ROUND_ID = 0; // For compatibility with GeneralizedTCR consider the challenge cycle the first round (index 0).
 
     /* Storage */
 
@@ -116,13 +116,13 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     uint256 public constant MULTIPLIER_DIVISOR = 10000; // Divisor parameter for multipliers.
 
     mapping(bytes32 => Item) public items; // Maps the item ID to its data in the form items[_itemID].
-    mapping(bytes32 => mapping(uint256 => Request)) public requests; // List of challenges, made against the item in the form requests[itemID][requestID].
-    mapping(bytes32 => mapping(uint256 => mapping(uint256 => Round))) public rounds; // Data of the different dispute rounds. rounds[itemID][requestID][roundId].
+    mapping(bytes32 => mapping(uint256 => Challenge)) public challenges; // List of challenges, made against the item in the form challenge[itemID][challengeID].
+    mapping(bytes32 => mapping(uint256 => mapping(uint256 => Round))) public rounds; // Data of the different dispute rounds. rounds[itemID][challengeID][roundId].
     mapping(bytes32 => mapping(
         uint256 => mapping(uint256 => mapping(address => uint256[3])))
-    ) public contributions; // Maps contributors to their contributions for each side in the form contributions[itemID][requestID][roundID][address][party].
+    ) public contributions; // Maps contributors to their contributions for each side in the form contributions[itemID][challengeID][roundID][address][party].
 
-    mapping(uint256 => bytes32) public disputeIDToItemID; // Maps a dispute ID to the ID of the item with the disputed request in the form disputeIDToItemID[disputeID].
+    mapping(uint256 => bytes32) public disputeIDToItemID; // Maps a dispute ID to the ID of the item in the form disputeIDToItemID[disputeID].
     IArbitrator public arbitrator; // Governor cannot change it.
     ArbitrationParams[] public arbitrationParamsChanges;
 
@@ -143,7 +143,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     event NewItem(bytes32 indexed _itemID, string _data);
 
     /**
-     * @dev Emitted when a party makes a request, raises a dispute or when a request is resolved.
+     * @dev Emitted when an item changes its state, raises a dispute or when a challenge is resolved. todo
      * @param _itemID The ID of the affected item.
      */
     event ItemStatusChange(bytes32 indexed _itemID);
@@ -155,9 +155,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     event ItemStartsWithdrawing(bytes32 indexed _itemID);
 
     /**
-     * @dev Emitted when a party contributes to an appeal. The roundID assumes the initial request and challenge deposits are the first round. This is done so indexers can know more information about the contribution without using call handlers.
+     * @dev Emitted when a party contributes to an appeal. The roundID assumes the initial submission and challenge deposits are the first round. This is done so indexers can know more information about the contribution without using call handlers.
      * @param _itemID The ID of the item.
-     * @param _requestID The index of the request that received the contribution.
+     * @param _challengeID The index of the challenge that received the contribution.
      * @param _roundID The index of the round that received the contribution.
      * @param _contributor The address making the contribution.
      * @param _contribution How much of the contribution was accepted.
@@ -165,7 +165,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     event Contribution(
         bytes32 indexed _itemID,
-        uint256 _requestID,
+        uint256 _challengeID,
         uint256 _roundID,
         address indexed _contributor,
         uint256 _contribution,
@@ -174,16 +174,16 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
     /**
      * @dev Emitted when someone withdraws more than 0 rewards.
-     * @param _beneficiary The address that made contributions to a request.
+     * @param _beneficiary The address that made contributions to a challenge.
      * @param _itemID The ID of the item submission to withdraw from.
-     * @param _request The request from which to withdraw.
+     * @param _challenge The challenge from which to withdraw.
      * @param _round The round from which to withdraw.
      * @param _reward The amount withdrawn.
      */
     event RewardWithdrawn(
         address indexed _beneficiary,
         bytes32 indexed _itemID,
-        uint256 _request,
+        uint256 _challenge,
         uint256 _round,
         uint256 _reward
     );
@@ -198,7 +198,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @dev Initialize the arbitrable curated registry.
      * @param _arbitrator Arbitrator to resolve potential disputes. The arbitrator is trusted to support appeal periods and not reenter.
      * @param _arbitratorExtraData Extra data for the trusted arbitrator contract.
-     * @param _clearingMetaEvidence The URI of the meta evidence object for clearing requests.
+     * @param _metaEvidence The URI of the meta evidence object for disputes.
      * @param _governor The trusted governor of this contract.
      * @param _token The ERC20 token for stakes of items and challenges. Cannot be modified.
      * @param _submissionMinDeposit The minimum amount of token deposit required to submit an item.
@@ -216,7 +216,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     function initialize(
         IArbitrator _arbitrator,
         bytes calldata _arbitratorExtraData,
-        string calldata _clearingMetaEvidence,
+        string calldata _metaEvidence,
         address _governor,
         IERC20 _token,
         uint256 _submissionMinDeposit,
@@ -236,7 +236,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         winnerStakeMultiplier = _stakeMultipliers[1];
         loserStakeMultiplier = _stakeMultipliers[2];
         challengeStakeMultiplier = _stakeMultipliers[3];
-        _doChangeArbitrationParams(0, _arbitratorExtraData, _clearingMetaEvidence);
+        _doChangeArbitrationParams(0, _arbitratorExtraData, _metaEvidence);
 
         initialized = true;
     }
@@ -277,14 +277,14 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         if (msg.value < arbitrationCost) revert BelowArbitrationDeposit();
 
         // When items are Absent as a result of getting manually withdrawn or removed via dispute,
-        // all other fields remained, but they will be overwritten here, with the exception of item.requestCount
+        // all other fields remained, but they will be overwritten here, with the exception of item.challengeCount
         item.status = Status.Submitted;
         item.arbitrationDeposit = uint128(arbitrationCost);
         item.submitter = payable(msg.sender);
         item.includedAt = uint48(block.timestamp);
         item.withdrawingTimestamp = 0;
         item.stake = _deposit;
-        // item.requestCount: can contain the requestCount on previous challenges, do not reset.
+        // item.challengeCount: can contain the challengeCount on previous challenges, do not reset.
 
         if (msg.value > arbitrationCost) {
             item.submitter.send(msg.value - arbitrationCost);
@@ -332,7 +332,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      *  The required amount is calculated by the contract.
      *  This makes a delay attack have this cost over time: c(t) = (1 + challengeStakeMultiplier) ^ sqrt(t)
      *  Susceptible to self challenges, could be disincetivized by burning some % stake of losing party.
-     * @param _itemID The ID of the item which request to challenge.
+     * @param _itemID The ID of the item to challenge.
      * @param _evidence A link to an evidence using its URI. Ignored if not provided.
      */
     function challengeItem(bytes32 _itemID, string calldata _evidence) external payable {
@@ -347,9 +347,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         uint256 challengeStake = item.stake * challengeStakeMultiplier / MULTIPLIER_DIVISOR;
         if (!token.transferFrom(msg.sender, address(this), challengeStake)) revert BelowDeposit();
 
-        Request storage request = requests[_itemID][item.requestCount++];
-        request.challenger = payable(msg.sender);
-        request.stake = challengeStake;
+        Challenge storage challenge = challenges[_itemID][item.challengeCount++];
+        challenge.challenger = payable(msg.sender);
+        challenge.stake = challengeStake;
         item.status = Status.Disputed;
         
         // Complexity O(N), Governor is trusted to not spam in order to surpass the gas limit.
@@ -362,43 +362,43 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             // If the item is not withdrawing, then this reference point is the current time.
             uint256 epochTimestamp = item.withdrawingTimestamp > 0 ? item.withdrawingTimestamp : block.timestamp;
             if (epochTimestamp - arbitrationParamsCooldown >= settingsTimestamp || item.includedAt >= settingsTimestamp) {
-                request.arbitrationParamsIndex = uint80(i);
+                challenge.arbitrationParamsIndex = uint80(i);
                 break;
             }
         }
 
-        ArbitrationParams storage arbitrationParams = arbitrationParamsChanges[request.arbitrationParamsIndex];
+        ArbitrationParams storage arbitrationParams = arbitrationParamsChanges[challenge.arbitrationParamsIndex];
 
         uint256 arbitrationCost = arbitrator.arbitrationCost(arbitrationParams.arbitratorExtraData);
 
         if (msg.value < arbitrationCost) revert BelowArbitrationDeposit();
 
         // Raise a dispute.
-        request.disputeID = arbitrator.createDispute{value: arbitrationCost}(
+        challenge.disputeID = arbitrator.createDispute{value: arbitrationCost}(
             RULING_OPTIONS,
             arbitrationParams.arbitratorExtraData
         );
-        // For compatibility with GeneralizedTCR consider the request/challenge cycle
+        // For compatibility with GeneralizedTCR consider the submission/challenge cycle
         // the first round (index 0), so we need to make the next round index 1.
-        request.roundCount = 2;
+        challenge.roundCount = 2;
 
-        disputeIDToItemID[request.disputeID] = _itemID;
+        disputeIDToItemID[challenge.disputeID] = _itemID;
 
         // evidenceGroupID is itemID
-        emit Dispute(arbitrator, request.disputeID, request.arbitrationParamsIndex, uint256(_itemID));
+        emit Dispute(arbitrator, challenge.disputeID, challenge.arbitrationParamsIndex, uint256(_itemID));
 
         if (bytes(_evidence).length > 0) {
             emit Evidence(arbitrator, uint256(_itemID), msg.sender, _evidence);
         }
 
         if (msg.value > arbitrationCost) {
-            request.challenger.send(msg.value - arbitrationCost);
+            challenge.challenger.send(msg.value - arbitrationCost);
         }
     }
 
     /**
      * @dev Takes up to the total amount required to fund a side of an appeal. Reimburses the rest. Creates an appeal if both sides are fully funded.
-     * @param _itemID The ID of the item which request to fund.
+     * @param _itemID The ID of the item in dispute to fund.
      * @param _side The recipient of the contribution.
      */
     function fundAppeal(bytes32 _itemID, Party _side) external payable {
@@ -407,21 +407,21 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         Item storage item = items[_itemID];
         if (item.status != Status.Disputed) revert ItemWrongStatus();
 
-        uint256 lastRequestIndex = item.requestCount - 1;
-        Request storage request = requests[_itemID][lastRequestIndex];
+        uint256 lastChallengeIndex = item.challengeCount - 1;
+        Challenge storage challenge = challenges[_itemID][lastChallengeIndex];
 
-        ArbitrationParams storage arbitrationParams = arbitrationParamsChanges[request.arbitrationParamsIndex];
+        ArbitrationParams storage arbitrationParams = arbitrationParamsChanges[challenge.arbitrationParamsIndex];
 
-        uint256 lastRoundIndex = request.roundCount - 1;
-        Round storage round = rounds[_itemID][lastRequestIndex][lastRoundIndex];
+        uint256 lastRoundIndex = challenge.roundCount - 1;
+        Round storage round = rounds[_itemID][lastChallengeIndex][lastRoundIndex];
         if (round.sideFunded == _side) revert AppealAlreadyFunded();
 
         uint256 multiplier;
         {
-            (uint256 appealPeriodStart, uint256 appealPeriodEnd) = arbitrator.appealPeriod(request.disputeID);
+            (uint256 appealPeriodStart, uint256 appealPeriodEnd) = arbitrator.appealPeriod(challenge.disputeID);
             if (!(block.timestamp >= appealPeriodStart && block.timestamp < appealPeriodEnd)) revert AppealNotWithinPeriod();
 
-            Party winner = Party(arbitrator.currentRuling(request.disputeID));
+            Party winner = Party(arbitrator.currentRuling(challenge.disputeID));
             if (winner == Party.None) {
                 multiplier = sharedStakeMultiplier;
             } else if (_side == winner) {
@@ -432,9 +432,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             }
         }
 
-        uint256 appealCost = arbitrator.appealCost(request.disputeID, arbitrationParams.arbitratorExtraData);
+        uint256 appealCost = arbitrator.appealCost(challenge.disputeID, arbitrationParams.arbitratorExtraData);
         uint256 totalCost = appealCost.addCap(appealCost.mulCap(multiplier) / MULTIPLIER_DIVISOR);
-        contribute(_itemID, lastRequestIndex, lastRoundIndex, uint256(_side), payable(msg.sender), msg.value, totalCost);
+        contribute(_itemID, lastChallengeIndex, lastRoundIndex, uint256(_side), payable(msg.sender), msg.value, totalCost);
 
         if (round.amountPaid[uint256(_side)] >= totalCost) {
             if (round.sideFunded == Party.None) {
@@ -444,8 +444,8 @@ contract PermanentGTCR is IArbitrable, IEvidence {
                 round.sideFunded = Party.None;
 
                 // Raise appeal if both sides are fully funded.
-                arbitrator.appeal{value: appealCost}(request.disputeID, arbitrationParams.arbitratorExtraData);
-                request.roundCount++;
+                arbitrator.appeal{value: appealCost}(challenge.disputeID, arbitrationParams.arbitratorExtraData);
+                challenge.roundCount++;
                 round.feeRewards = round.feeRewards.subCap(appealCost);
             }
         }
@@ -453,32 +453,32 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
     /**
      * @dev If a dispute was raised, sends the fee stake rewards and reimbursements proportionally to the contributions made to the winner of a dispute.
-     * @param _beneficiary The address that made contributions to a request.
+     * @param _beneficiary The address that made contributions to a dispute.
      * @param _itemID The ID of the item submission to withdraw from.
-     * @param _requestID The request from which to withdraw from.
+     * @param _challengeID The challenge from which to withdraw from.
      * @param _roundID The round from which to withdraw from.
      */
     function withdrawFeesAndRewards(
         address payable _beneficiary,
         bytes32 _itemID,
-        uint120 _requestID,
+        uint120 _challengeID,
         uint256 _roundID
     ) external {
         Item storage item = items[_itemID];
 
-        // If item.status is Disputed, that means latest Request is still an ongoing dispute.
-        if (item.requestCount - 1 == _requestID && item.status == Status.Disputed) revert RewardsPendingDispute();
+        // If item.status is Disputed, that means latest Challenge is still an ongoing dispute.
+        if (item.challengeCount - 1 == _challengeID && item.status == Status.Disputed) revert RewardsPendingDispute();
 
-        Request storage request = requests[_itemID][_requestID];
-        Round storage round = rounds[_itemID][_requestID][_roundID];
-        uint256[3] storage contributions = contributions[_itemID][_requestID][_roundID][_beneficiary];
+        Challenge storage challenge = challenges[_itemID][_challengeID];
+        Round storage round = rounds[_itemID][_challengeID][_roundID];
+        uint256[3] storage contributions = contributions[_itemID][_challengeID][_roundID][_beneficiary];
         uint256 reward;
-        if (_roundID == request.roundCount - 1) {
+        if (_roundID == challenge.roundCount - 1) {
             // Reimburse if not enough fees were raised to appeal the ruling.
             reward =
                 contributions[uint256(Party.Submitter)] +
                 contributions[uint256(Party.Challenger)];
-        } else if (request.ruling == Party.None) {
+        } else if (challenge.ruling == Party.None) {
             uint256 totalFeesInRound = round.amountPaid[uint256(Party.Challenger)] +
                 round.amountPaid[uint256(Party.Submitter)];
             uint256 claimableFees = contributions[uint256(Party.Challenger)] +
@@ -486,9 +486,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             reward = totalFeesInRound > 0 ? (claimableFees * round.feeRewards) / totalFeesInRound : 0;
         } else {
             // Reward the winner.
-            reward = round.amountPaid[uint256(request.ruling)] > 0
-                ? (contributions[uint256(request.ruling)] * round.feeRewards) /
-                    round.amountPaid[uint256(request.ruling)]
+            reward = round.amountPaid[uint256(challenge.ruling)] > 0
+                ? (contributions[uint256(challenge.ruling)] * round.feeRewards) /
+                    round.amountPaid[uint256(challenge.ruling)]
                 : 0;
         }
         contributions[uint256(Party.Submitter)] = 0;
@@ -496,7 +496,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         if (reward > 0) {
             _beneficiary.send(reward);
-            emit RewardWithdrawn(_beneficiary, _itemID, _requestID, _roundID, reward);
+            emit RewardWithdrawn(_beneficiary, _itemID, _challengeID, _roundID, reward);
         }
     }
 
@@ -513,10 +513,10 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         bytes32 itemID = disputeIDToItemID[_disputeID];
         Item storage item = items[itemID];
         if (item.status != Status.Disputed) revert ItemWrongStatus();
-        Request storage request = requests[itemID][item.requestCount - 1];
+        Challenge storage challenge = challenges[itemID][item.challengeCount - 1];
 
         uint256 finalRuling;
-        Round storage round = rounds[itemID][item.requestCount - 1][request.roundCount - 1];
+        Round storage round = rounds[itemID][item.challengeCount - 1][challenge.roundCount - 1];
 
         // If one side paid its fees, the ruling is in its favor.
         // Note that if the other side had also paid, sideFunded would have been reset
@@ -531,9 +531,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         emit Ruling(IArbitrator(msg.sender), _disputeID, finalRuling);
 
-        request.ruling = Party(finalRuling);
+        challenge.ruling = Party(finalRuling);
 
-        if (request.ruling == Party.None) {
+        if (challenge.ruling == Party.None) {
             // If the Arbitrator refuses to rule:
             // - Either this Registry was using a Policy that the Arbitrator will always refuse (we don't care).
             // - Or the Registry behaved, but the Arbitrator misbehaved. We will asume this.
@@ -543,15 +543,15 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
             // Refunding for challenger
             item.arbitrationDeposit = item.arbitrationDeposit / 2; // if odd, 1 wei will stay in contract
-            request.challenger.send(item.arbitrationDeposit);
-            try token.transfer(request.challenger, request.stake) {} catch {}
+            challenge.challenger.send(item.arbitrationDeposit);
+            try token.transfer(challenge.challenger, challenge.stake) {} catch {}
             // Refunding for submitter and removing the Item
             _doWithdrawItem(itemID);
-        } else if (request.ruling == Party.Submitter) {
+        } else if (challenge.ruling == Party.Submitter) {
             // If the arbitrator asserts item correctness, the item is reincluded.
-            // Also, the request.stake is added to the item.stake, to raise the cost of future challenges.
+            // Also, the challenge.stake is added to the item.stake, to raise the cost of future challenges.
             item.status = Status.Reincluded;
-            item.stake = item.stake + request.stake;
+            item.stake = item.stake + challenge.stake;
             item.includedAt = uint48(block.timestamp);
 
             // The submitter might have asked for a withdraw before the Dispute, or during the Dispute.
@@ -563,9 +563,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             // The item is also removed.
             item.status = Status.Absent;
 
-            try token.transfer(request.challenger, item.stake + request.stake) {} catch {}
+            try token.transfer(challenge.challenger, item.stake + challenge.stake) {} catch {}
 
-            request.challenger.send(item.arbitrationDeposit);
+            challenge.challenger.send(item.arbitrationDeposit);
         }
 
         emit ItemStatusChange(itemID);
@@ -671,13 +671,13 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @notice Changes the params related to arbitration.
      * @dev Effectively makes all new items use the new set of params, and older items be eventually subject to them.
      * @param _arbitratorExtraData Extra data for the trusted arbitrator contract.
-     * @param _clearingMetaEvidence The URI of the meta evidence object for clearing requests.
+     * @param _metaEvidence The URI of the meta evidence object.
      */
     function changeArbitrationParams(
         bytes calldata _arbitratorExtraData,
-        string calldata _clearingMetaEvidence
+        string calldata _metaEvidence
     ) external onlyGovernor {
-        _doChangeArbitrationParams(uint48(block.timestamp), _arbitratorExtraData, _clearingMetaEvidence);
+        _doChangeArbitrationParams(uint48(block.timestamp), _arbitratorExtraData, _metaEvidence);
     }
 
     /* Internal */
@@ -686,14 +686,14 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @dev Effectively makes all new items use the new set of params, and older items be eventually subject to them.
      * @param _timestamp Set to 0 on contract initialization, set to block.timestamp on governor arbitration change.
      * @param _arbitratorExtraData Extra data for the trusted arbitrator contract.
-     * @param _clearingMetaEvidence The URI of the meta evidence object for clearing requests.
+     * @param _metaEvidence The URI of the meta evidence object.
      */
     function _doChangeArbitrationParams(
         uint48 _timestamp,
         bytes memory _arbitratorExtraData,
-        string memory _clearingMetaEvidence
+        string memory _metaEvidence
     ) internal {
-        emit MetaEvidence(arbitrationParamsChanges.length, _clearingMetaEvidence);
+        emit MetaEvidence(arbitrationParamsChanges.length, _metaEvidence);
 
         arbitrationParamsChanges.push(
             ArbitrationParams({
@@ -722,7 +722,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @notice Make a fee contribution.
      * @dev It cannot be inlined in fundAppeal because of the stack limit.
      * @param _itemID The item receiving the contribution.
-     * @param _requestID The request to contribute.
+     * @param _challengeID The challenge to contribute.
      * @param _roundID The round to contribute.
      * @param _side The side for which to contribute.
      * @param _contributor The contributor.
@@ -731,14 +731,14 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
     function contribute(
         bytes32 _itemID,
-        uint256 _requestID,
+        uint256 _challengeID,
         uint256 _roundID,
         uint256 _side,
         address payable _contributor,
         uint256 _amount,
         uint256 _totalRequired
     ) internal {
-        Round storage round = rounds[_itemID][_requestID][_roundID];
+        Round storage round = rounds[_itemID][_challengeID][_roundID];
         uint256 pendingAmount = _totalRequired.subCap(round.amountPaid[_side]);
 
         // Take up to the amount necessary to fund the current round at the current costs.
@@ -751,7 +751,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             remainingETH = _amount - pendingAmount;
         }
 
-        contributions[_itemID][_requestID][_roundID][_contributor][_side] += contribution;
+        contributions[_itemID][_challengeID][_roundID][_contributor][_side] += contribution;
         round.amountPaid[_side] += contribution;
         round.feeRewards += contribution;
 
@@ -761,7 +761,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         }
 
         if (contribution > 0) {
-            emit Contribution(_itemID, _requestID, _roundID, _contributor, contribution, Party(_side));
+            emit Contribution(_itemID, _challengeID, _roundID, _contributor, contribution, Party(_side));
         }
     }
 

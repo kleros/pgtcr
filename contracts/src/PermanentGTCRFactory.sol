@@ -37,7 +37,7 @@ contract PermanentGTCRFactory {
      * @dev Deploy the arbitrable curated registry.
      * @param _arbitrator Arbitrator to resolve potential disputes. The arbitrator is trusted to support appeal periods and not reenter.
      * @param _arbitratorExtraData Extra data for the trusted arbitrator contract.
-     * @param _clearingMetaEvidence The URI of the meta evidence object for clearing requests.
+     * @param _metaEvidence The URI of the meta evidence object.
      * @param _governor The trusted governor of this contract.
      * @param _token The ERC20 token for stakes of items and challenges. Cannot be modified.
      * @param _submissionMinDeposit The minimum amount of token deposit required to submit an item.
@@ -56,7 +56,7 @@ contract PermanentGTCRFactory {
     function deploy(
         IArbitrator _arbitrator,
         bytes memory _arbitratorExtraData,
-        string memory _clearingMetaEvidence,
+        string memory _metaEvidence,
         address _governor,
         IERC20 _token,
         uint256 _submissionMinDeposit,
@@ -68,7 +68,7 @@ contract PermanentGTCRFactory {
         instance.initialize(
             _arbitrator,
             _arbitratorExtraData,
-            _clearingMetaEvidence,
+            _metaEvidence,
             _governor,
             _token,
             _submissionMinDeposit,
