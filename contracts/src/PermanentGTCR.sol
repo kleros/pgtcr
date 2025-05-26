@@ -1,6 +1,6 @@
 /**
  *  @authors: [@greenlucid]
- *  @reviewers: [@fcanela, @jaybuidl, @kokialgo]
+ *  @reviewers: [@fcanela, @jaybuidl, @mani99brar]
  *  @auditors: []
  *  @bounties: []
  *  @deployments: []
@@ -10,6 +10,8 @@ pragma solidity ^0.8.27;
 
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import {SafeSend} from "./SafeSend.sol";
+
 import {IArbitrable, IArbitrator} from "@kleros/erc-792/contracts/IArbitrator.sol";
 import {IEvidence} from "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
 
@@ -30,6 +32,8 @@ import {IEvidence} from "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
  */
 contract PermanentGTCR is IArbitrable, IEvidence {
     using SafeERC20 for IERC20;
+    using SafeSend for address payable;
+
     /* Enums */
 
     enum Status {
@@ -85,6 +89,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
     uint256 public constant RULING_OPTIONS = 2; // The amount of non 0 choices the arbitrator can give.
     uint256 private constant RESERVED_ROUND_ID = 0; // For compatibility with GeneralizedTCR consider the challenge cycle the first round (index 0).
+    address immutable W_NATIVE; // For SafeSend.
 
     /* Storage */
 
@@ -192,6 +197,14 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      */
      event SettingsUpdated();
 
+    /** 
+     * @dev PGTCR is deployed only once per chain, new instances are created with minimal proxy from the factory.
+     *  This is only needed to set the wrapped native token, which is used in SafeSend.
+     */
+    constructor(address _wNative) {
+        W_NATIVE = _wNative;
+    }
+
     /**
      * @dev Initialize the arbitrable curated registry.
      * @param _arbitrator Arbitrator to resolve potential disputes. The arbitrator is trusted to support appeal periods and not reenter.
@@ -285,7 +298,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         // item.challengeCount: can contain the challengeCount on previous challenges, do not reset.
 
         if (msg.value > arbitrationCost) {
-            item.submitter.send(msg.value - arbitrationCost);
+            item.submitter.safeSend(msg.value - arbitrationCost, W_NATIVE);
         }
     }
 
@@ -391,7 +404,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         }
 
         if (msg.value > arbitrationCost) {
-            challenge.challenger.send(msg.value - arbitrationCost);
+            challenge.challenger.safeSend(msg.value - arbitrationCost, W_NATIVE);
         }
     }
 
@@ -494,7 +507,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         contribs[uint256(Party.Challenger)] = 0;
 
         if (reward > 0) {
-            _beneficiary.send(reward);
+            _beneficiary.safeSend(reward, W_NATIVE);
             emit RewardWithdrawn(_beneficiary, _itemID, _challengeID, _roundID, reward);
         }
     }
@@ -542,7 +555,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
             // Refunding for challenger
             item.arbitrationDeposit = item.arbitrationDeposit / 2; // if odd, 1 wei will stay in contract
-            challenge.challenger.send(item.arbitrationDeposit);
+            challenge.challenger.safeSend(item.arbitrationDeposit, W_NATIVE);
             token.trySafeTransfer(challenge.challenger, challenge.stake);
             // Refunding for submitter and removing the Item
             _doWithdrawItem(item);
@@ -564,7 +577,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
             token.trySafeTransfer(challenge.challenger, item.stake + challenge.stake);
 
-            challenge.challenger.send(item.arbitrationDeposit);
+            challenge.challenger.safeSend(item.arbitrationDeposit, W_NATIVE);
         }
 
         emit ItemStatusChange(itemID, item.status);
@@ -708,7 +721,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     function _doWithdrawItem(Item storage item) internal {
         item.status = Status.Absent;
         
-        item.submitter.send(item.arbitrationDeposit);
+        item.submitter.safeSend(item.arbitrationDeposit, W_NATIVE);
 
         token.trySafeTransfer(item.submitter, item.stake);
     }
@@ -752,7 +765,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         // Reimburse leftover ETH.
         if (remainingETH > 0) {
-            _contributor.send(remainingETH);
+            _contributor.safeSend(remainingETH, W_NATIVE);
         }
 
         if (contribution > 0) {

@@ -20,6 +20,18 @@ contract PolloCoin is ERC20 {
     }
 }
 
+contract WETH is ERC20 {
+  constructor() ERC20("Wrapped Ethereum", "WETH") {}
+  function deposit() public payable {
+    _mint(msg.sender, msg.value);
+  }
+  function withdraw(uint wad) public {
+    require(balanceOf(msg.sender) >= wad);
+    _burn(msg.sender, wad);
+    payable(msg.sender).transfer(wad);
+  }
+}
+
 contract PGTCRTest is Test {
     address alice = vm.addr(1);
     address aliceRefuser = address(1);
@@ -28,7 +40,8 @@ contract PGTCRTest is Test {
     address governor = vm.addr(4);
     address king = vm.addr(5);
     
-    PermanentGTCR pgtcrTemplate = new PermanentGTCR();
+    WETH weth = new WETH();
+    PermanentGTCR pgtcrTemplate = new PermanentGTCR(address(weth));
     PermanentGTCRFactory pgtcrFactory = new PermanentGTCRFactory(address(pgtcrTemplate));
     CentralizedArbitratorWithAppeal arbitrator;
 
@@ -174,20 +187,22 @@ contract AddItem is PGTCRTest {
       bytes32 itemID = keccak256(abi.encodePacked("item1"));
       uint256 arbCost = arbitrator.arbitrationCost(arbitratorExtraData);
       vm.deal(aliceRefuser, 1e18);
-      uint256 prebalance = aliceRefuser.balance;
       // send come CAW to aliceRefuser so she can submit
       vm.prank(alice);
       token.transfer(aliceRefuser, 1e18);
 
       vm.startPrank(aliceRefuser);
       token.approve(address(pgtcr), submissionMinDeposit);
+
+      vm.expectEmit(true, true, false, true, address(weth));
+      emit IERC20.Transfer(address(pgtcr), address(aliceRefuser), 1e18-arbCost);
       pgtcr.addItem{value: aliceRefuser.balance}("item1", submissionMinDeposit);
 
       (, uint256 arbitrationDeposit, , , , , ) = pgtcr.items(itemID);
       assertEq(arbitrationDeposit, arbCost);
-      assertEq(address(pgtcr).balance, prebalance); // since aliceRefuser refuses to receive, funds get stuck in contract
+      assertEq(address(pgtcr).balance, arbCost);
+      assertEq(weth.balanceOf(aliceRefuser), 1e18-arbCost); // aliceRefuser cannot get native so she gets wNative
       assertEq(aliceRefuser.balance, 0);
-      
   }
 
   function test_AddItemWhenNotEnoughDeposit() public {
@@ -472,6 +487,19 @@ contract ChallengeItem is PGTCRTest {
     uint256 bobEthBefore = bob.balance;
     pgtcr.challengeItem{value: bob.balance}(itemID, "");
     assertEq(bob.balance, bobEthBefore - arbCost);
+  }
+
+  function test_ChallengeArbDepositRefundedRefuse() public {
+    vm.prank(alice);
+    token.transfer(aliceRefuser, 1e18);
+
+    vm.deal(aliceRefuser, 1e18);
+    vm.startPrank(aliceRefuser);
+    token.approve(address(pgtcr), challengeStake);
+    uint256 ethBefore = aliceRefuser.balance;
+    pgtcr.challengeItem{value: aliceRefuser.balance}(itemID, "");
+    assertEq(aliceRefuser.balance, 0);
+    assertEq(weth.balanceOf(aliceRefuser), ethBefore - arbCost);
   }
 
   function test_ChallengeWithEvidenceEmitsEvidence() public {
