@@ -1,6 +1,6 @@
 /**
  *  @authors: [@greenlucid]
- *  @reviewers: []
+ *  @reviewers: [@fcanela, @jaybuidl, @kokialgo]
  *  @auditors: []
  *  @bounties: []
  *  @deployments: []
@@ -9,10 +9,9 @@
 pragma solidity ^0.8.27;
 
 import {IERC20} from "@openzeppelin/contracts/interfaces/IERC20.sol";
+import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {IArbitrable, IArbitrator} from "@kleros/erc-792/contracts/IArbitrator.sol";
 import {IEvidence} from "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
-import {CappedMath} from "./utils/CappedMath.sol";
-import {CappedMath128} from "./utils/CappedMath128.sol";
 
 // It is the user responsibility to accept ETH. It is the ERC20 token responsibility to not revert transfers.
 // ERC20 token are not trusted to not revert on transfers from Contract -> Beneficiary.
@@ -30,9 +29,7 @@ import {CappedMath128} from "./utils/CappedMath128.sol";
  *  It implements appeal fees crowdfunding.
  */
 contract PermanentGTCR is IArbitrable, IEvidence {
-    using CappedMath for uint256;
-    using CappedMath128 for uint128;
-
+    using SafeERC20 for IERC20;
     /* Enums */
 
     enum Status {
@@ -143,10 +140,11 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     event NewItem(bytes32 indexed _itemID, string _data);
 
     /**
-     * @dev Emitted when an item changes its state, raises a dispute or when a challenge is resolved. todo
+     * @dev Emitted when an item changes its status, gets challenged or when a challenge is resolved.
      * @param _itemID The ID of the affected item.
+     * @param _status The new status of the item.
      */
-    event ItemStatusChange(bytes32 indexed _itemID);
+    event ItemStatusChange(bytes32 indexed _itemID, Status _status);
 
     /**
      * @dev Emitted when an item starts a withdrawing process.
@@ -249,7 +247,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
     /**
      * @dev Submit an item. Accepts enough ETH to cover the arbitration fees, reimburses the rest.
-     *  The item will not be considered valid until the submission period ellapses.
+     *  The item will not be considered valid until the submission period elapses.
      * @param _item The URI to the item data.
      * @param _deposit The amount of token that will be held as collateral to assert correctness.
      *  At the bare minimum it will equal the submissionMinDeposit, but it could be larger
@@ -264,11 +262,11 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         if (item.includedAt == 0) {
             emit NewItem(itemID, _item);
         } else {
-            emit ItemStatusChange(itemID);
+            emit ItemStatusChange(itemID, Status.Submitted);
         }
 
         if (_deposit < submissionMinDeposit) revert BelowDeposit();
-        if(!token.transferFrom(msg.sender, address(this), _deposit)) revert BelowDeposit();
+        if(!token.trySafeTransferFrom(msg.sender, address(this), _deposit)) revert TransferFailed();
 
         uint256 arbitrationParamsIndex = arbitrationParamsChanges.length - 1;
         bytes storage arbitratorExtraData = arbitrationParamsChanges[arbitrationParamsIndex].arbitratorExtraData;
@@ -322,8 +320,8 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             || block.timestamp < item.withdrawingTimestamp + withdrawingPeriod
         ) revert ItemWithdrawingNotYet();
 
-        _doWithdrawItem(_itemID);
-        emit ItemStatusChange(_itemID);
+        _doWithdrawItem(item);
+        emit ItemStatusChange(_itemID, Status.Absent);
     }
 
     /**
@@ -345,7 +343,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         ) revert ItemWrongStatus(); // Canonically withdrawn, just pending execution 
 
         uint256 challengeStake = item.stake * challengeStakeMultiplier / MULTIPLIER_DIVISOR;
-        if (!token.transferFrom(msg.sender, address(this), challengeStake)) revert BelowDeposit();
+        if (!token.trySafeTransferFrom(msg.sender, address(this), challengeStake)) revert TransferFailed();
 
         Challenge storage challenge = challenges[_itemID][item.challengeCount++];
         challenge.challenger = payable(msg.sender);
@@ -386,6 +384,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         // evidenceGroupID is itemID
         emit Dispute(arbitrator, challenge.disputeID, challenge.arbitrationParamsIndex, uint256(_itemID));
+        emit ItemStatusChange(_itemID, Status.Disputed);
 
         if (bytes(_evidence).length > 0) {
             emit Evidence(arbitrator, uint256(_itemID), msg.sender, _evidence);
@@ -402,7 +401,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @param _side The recipient of the contribution.
      */
     function fundAppeal(bytes32 _itemID, Party _side) external payable {
-        if (_side == Party.None) revert AppealNotRtA();
+        if (_side == Party.None) revert AppealNotRtA(); // RtA means Refuse To Arbitrate, read related comment on rule()
 
         Item storage item = items[_itemID];
         if (item.status != Status.Disputed) revert ItemWrongStatus();
@@ -428,13 +427,13 @@ contract PermanentGTCR is IArbitrable, IEvidence {
                 multiplier = winnerStakeMultiplier;
             } else {
                 multiplier = loserStakeMultiplier;
-                if(!(block.timestamp < (appealPeriodStart + appealPeriodEnd) / 2)) revert AppealNotWithinPeriod();
+                if(!(block.timestamp < (appealPeriodStart + appealPeriodEnd) / 2)) revert AppealLoserNotWithinPeriod();
             }
         }
 
         uint256 appealCost = arbitrator.appealCost(challenge.disputeID, arbitrationParams.arbitratorExtraData);
-        uint256 totalCost = appealCost.addCap(appealCost.mulCap(multiplier) / MULTIPLIER_DIVISOR);
-        contribute(_itemID, lastChallengeIndex, lastRoundIndex, uint256(_side), payable(msg.sender), msg.value, totalCost);
+        uint256 totalCost = appealCost + ((appealCost * multiplier) / MULTIPLIER_DIVISOR);
+        _contribute(_itemID, lastChallengeIndex, lastRoundIndex, uint256(_side), payable(msg.sender), msg.value, totalCost);
 
         if (round.amountPaid[uint256(_side)] >= totalCost) {
             if (round.sideFunded == Party.None) {
@@ -446,7 +445,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
                 // Raise appeal if both sides are fully funded.
                 arbitrator.appeal{value: appealCost}(challenge.disputeID, arbitrationParams.arbitratorExtraData);
                 challenge.roundCount++;
-                round.feeRewards = round.feeRewards.subCap(appealCost);
+                round.feeRewards = round.feeRewards - appealCost;
             }
         }
     }
@@ -471,28 +470,28 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
         Challenge storage challenge = challenges[_itemID][_challengeID];
         Round storage round = rounds[_itemID][_challengeID][_roundID];
-        uint256[3] storage contributions = contributions[_itemID][_challengeID][_roundID][_beneficiary];
+        uint256[3] storage contribs = contributions[_itemID][_challengeID][_roundID][_beneficiary];
         uint256 reward;
         if (_roundID == challenge.roundCount - 1) {
             // Reimburse if not enough fees were raised to appeal the ruling.
             reward =
-                contributions[uint256(Party.Submitter)] +
-                contributions[uint256(Party.Challenger)];
+                contribs[uint256(Party.Submitter)] +
+                contribs[uint256(Party.Challenger)];
         } else if (challenge.ruling == Party.None) {
             uint256 totalFeesInRound = round.amountPaid[uint256(Party.Challenger)] +
                 round.amountPaid[uint256(Party.Submitter)];
-            uint256 claimableFees = contributions[uint256(Party.Challenger)] +
-                contributions[uint256(Party.Submitter)];
+            uint256 claimableFees = contribs[uint256(Party.Challenger)] +
+                contribs[uint256(Party.Submitter)];
             reward = totalFeesInRound > 0 ? (claimableFees * round.feeRewards) / totalFeesInRound : 0;
         } else {
             // Reward the winner.
             reward = round.amountPaid[uint256(challenge.ruling)] > 0
-                ? (contributions[uint256(challenge.ruling)] * round.feeRewards) /
+                ? (contribs[uint256(challenge.ruling)] * round.feeRewards) /
                     round.amountPaid[uint256(challenge.ruling)]
                 : 0;
         }
-        contributions[uint256(Party.Submitter)] = 0;
-        contributions[uint256(Party.Challenger)] = 0;
+        contribs[uint256(Party.Submitter)] = 0;
+        contribs[uint256(Party.Challenger)] = 0;
 
         if (reward > 0) {
             _beneficiary.send(reward);
@@ -536,7 +535,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         if (challenge.ruling == Party.None) {
             // If the Arbitrator refuses to rule:
             // - Either this Registry was using a Policy that the Arbitrator will always refuse (we don't care).
-            // - Or the Registry behaved, but the Arbitrator misbehaved. We will asume this.
+            // - Or the Registry behaved, but the Arbitrator misbehaved. We will assume this.
             // Since RtA is not a normal ruling, to minimize damage to both parties, split the cost of arb
             // among Submitter and Challenger. This means the item is no longer collateralized, so remove it.
             // Submitter and Challenger deposit will be returned to each respective party.
@@ -544,9 +543,9 @@ contract PermanentGTCR is IArbitrable, IEvidence {
             // Refunding for challenger
             item.arbitrationDeposit = item.arbitrationDeposit / 2; // if odd, 1 wei will stay in contract
             challenge.challenger.send(item.arbitrationDeposit);
-            try token.transfer(challenge.challenger, challenge.stake) {} catch {}
+            token.trySafeTransfer(challenge.challenger, challenge.stake);
             // Refunding for submitter and removing the Item
-            _doWithdrawItem(itemID);
+            _doWithdrawItem(item);
         } else if (challenge.ruling == Party.Submitter) {
             // If the arbitrator asserts item correctness, the item is reincluded.
             // Also, the challenge.stake is added to the item.stake, to raise the cost of future challenges.
@@ -556,19 +555,19 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
             // The submitter might have asked for a withdraw before the Dispute, or during the Dispute.
             // If that's the case, the item will be withdrawn.
-            if (item.withdrawingTimestamp > 0) _doWithdrawItem(itemID);
+            if (item.withdrawingTimestamp > 0) _doWithdrawItem(item);
         } else {
             // If the arbitrator rules to remove the item, the challenger is awarded with the arb deposit,
-            // and whatever stake was collateralizing the item, plus the stake placed on chalenge.
+            // and whatever stake was collateralizing the item, plus the stake placed on challenge.
             // The item is also removed.
             item.status = Status.Absent;
 
-            try token.transfer(challenge.challenger, item.stake + challenge.stake) {} catch {}
+            token.trySafeTransfer(challenge.challenger, item.stake + challenge.stake);
 
             challenge.challenger.send(item.arbitrationDeposit);
         }
 
-        emit ItemStatusChange(itemID);
+        emit ItemStatusChange(itemID, item.status);
     }
 
     /**
@@ -704,18 +703,14 @@ contract PermanentGTCR is IArbitrable, IEvidence {
 
     /**
      * @dev Effectively triggers the withdrawal of an item, making it Absent and returning funds to the submitter.
-     * @param _itemID ID of the Item to withdraw.
+     * @param item Item to withdraw.
      */
-    function _doWithdrawItem(
-        bytes32 _itemID
-    ) internal {
-        Item storage item = items[_itemID];
-
+    function _doWithdrawItem(Item storage item) internal {
         item.status = Status.Absent;
         
         item.submitter.send(item.arbitrationDeposit);
 
-        try token.transfer(item.submitter, item.stake) {} catch {}
+        token.trySafeTransfer(item.submitter, item.stake);
     }
 
     /**
@@ -729,7 +724,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
      * @param _amount The amount contributed.
      * @param _totalRequired The total amount required for this side.
      */
-    function contribute(
+    function _contribute(
         bytes32 _itemID,
         uint256 _challengeID,
         uint256 _roundID,
@@ -739,7 +734,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         uint256 _totalRequired
     ) internal {
         Round storage round = rounds[_itemID][_challengeID][_roundID];
-        uint256 pendingAmount = _totalRequired.subCap(round.amountPaid[_side]);
+        uint256 pendingAmount = _totalRequired - round.amountPaid[_side];
 
         // Take up to the amount necessary to fund the current round at the current costs.
         uint256 contribution; // Amount contributed.
@@ -773,12 +768,14 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     error ArbitratorOnly();
     error ItemWrongStatus();
     error BelowDeposit();
+    error TransferFailed();
     error BelowArbitrationDeposit();
     error ItemWithdrawingAlready();
     error ItemWithdrawingNotYet();
     error AppealNotRtA();
     error AppealAlreadyFunded();
-    error AppealNotWithinPeriod();
+    error AppealNotWithinPeriod(); // Not AppealWinner___ because appealing in period applies to both sides.
+    error AppealLoserNotWithinPeriod();
     error RewardsPendingDispute();
     error RulingInvalidOption();
 }

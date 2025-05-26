@@ -1,6 +1,6 @@
 /**
  *  @authors: [@greenlucid]
- *  @reviewers: []
+ *  @reviewers: [@fcanela, @jaybuidl, @kokialgo]
  *  @auditors: []
  *  @bounties: []
  *  @deployments: []

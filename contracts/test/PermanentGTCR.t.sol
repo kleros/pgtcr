@@ -234,7 +234,7 @@ contract AddItem is PGTCRTest {
 
       token.approve(address(pgtcr), submissionMinDeposit);
       vm.expectEmit(true, true, true, true);
-      emit PermanentGTCR.ItemStatusChange(itemID); // instead of NewItem
+      emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Submitted); // instead of NewItem
       pgtcr.addItem{value: arbCost}("item1", submissionMinDeposit);
   }
 }
@@ -283,7 +283,7 @@ contract WithdrawItem is PGTCRTest {
     vm.expectEmit(true, true, false, true, address(token));
     emit IERC20.Transfer(address(pgtcr), alice, submissionMinDeposit);
     vm.expectEmit(true, true, false, false, address(pgtcr));
-    emit PermanentGTCR.ItemStatusChange(itemID);
+    emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Absent);
 
     uint256 aliceEthBefore = alice.balance;
     vm.prank(alice);
@@ -451,11 +451,11 @@ contract ChallengeItem is PGTCRTest {
 
   function test_ChallengeInsufficientTokenReverts() public {
     vm.startPrank(bob);
-    vm.expectRevert(); // ERC20 transfer fails because unapproved
+    vm.expectRevert(PermanentGTCR.TransferFailed.selector); // ERC20 transfer fails because unapproved
     pgtcr.challengeItem{value: arbCost}(itemID, "");
 
     token.approve(address(pgtcr), challengeStake - 1); // ERC20 transfer fails because not enough approved
-    vm.expectRevert();
+    vm.expectRevert(PermanentGTCR.TransferFailed.selector); 
     pgtcr.challengeItem{value: arbCost}(itemID, "");
   }
 
@@ -610,7 +610,7 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.expectEmit(true, true, true, false, address(pgtcr));
     emit IArbitrable.Ruling(IArbitrator(arbitrator), disputeID, uint256(PermanentGTCR.Party.Submitter));
     vm.expectEmit(true, false, false, false, address(pgtcr));
-    emit PermanentGTCR.ItemStatusChange(itemID);
+    emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Reincluded);
     arbitrator.executeRuling(0);
     // item was "Reincluded"
     (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
@@ -624,6 +624,30 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.assertEq(includedAt, uint48(block.timestamp));
     vm.assertEq(withdrawingTimestamp, 0);
     vm.assertEq(stake, submissionMinDeposit + challengeStake);
+  }
+
+  function test_Rule_Appeal_OutsidePeriod() public {
+    vm.prank(king);
+    arbitrator.giveRuling(0, uint256(PermanentGTCR.Party.Submitter));
+
+    (uint256 appealStart, uint256 appealEnd) = arbitrator.appealPeriod(disputeID);
+    vm.warp((appealStart + appealEnd) / 2 + 1); // outside losing period
+    // bob will appeal for himself but its too late
+    vm.startPrank(bob);
+
+    uint256 loserAppealFund = arbitrator.appealCost(disputeID, "")
+      + arbitrator.appealCost(disputeID, "") * pgtcr.loserStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
+
+    vm.expectRevert(PermanentGTCR.AppealLoserNotWithinPeriod.selector);
+    pgtcr.fundAppeal{value: loserAppealFund}(itemID, PermanentGTCR.Party.Challenger);
+    vm.stopPrank();
+
+    vm.warp(appealEnd + 1); // outside appeal period
+
+    vm.startPrank(alice);
+    vm.expectRevert(PermanentGTCR.AppealNotWithinPeriod.selector);
+    pgtcr.fundAppeal{value: loserAppealFund}(itemID, PermanentGTCR.Party.Challenger);
+    vm.stopPrank();
   }
 
   function test_Rule_NoAppeal_Submitter_WasWithdrawing() public {
@@ -643,7 +667,7 @@ contract AppealRuleAndContribs is PGTCRTest {
     // Alice will get her original deposit + Bob's challenger stake
     emit IERC20.Transfer(address(pgtcr), alice, submissionMinDeposit + challengeStake);
     vm.expectEmit(true, false, false, false, address(pgtcr));
-    emit PermanentGTCR.ItemStatusChange(itemID);
+    emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Absent);
     arbitrator.executeRuling(0);
     // item was Withdrawn, so must be Absent
     (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
@@ -749,7 +773,7 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.expectEmit(true, true, false, true, address(token));
     emit IERC20.Transfer(address(pgtcr), bob, submissionMinDeposit + challengeStake);
     vm.expectEmit(true, false, false, false, address(pgtcr));
-    emit PermanentGTCR.ItemStatusChange(itemID);
+    emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Absent);
     arbitrator.executeRuling(0);
     // item is now Absent, challengeCount remains at 1, all other values don't matter
     (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
@@ -811,7 +835,7 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.expectEmit(true, true, true, false, address(pgtcr));
     emit IArbitrable.Ruling(IArbitrator(arbitrator), disputeID, uint256(PermanentGTCR.Party.Submitter));
     vm.expectEmit(true, false, false, false, address(pgtcr));
-    emit PermanentGTCR.ItemStatusChange(itemID);
+    emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Reincluded);
     arbitrator.executeRuling(0);
     // item is now Reincluded because Submitter won
     (PermanentGTCR.Status status, , , , uint48 includedAt, , uint256 stake) = pgtcr.items(itemID);
@@ -878,7 +902,7 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.expectEmit(true, true, true, false, address(pgtcr));
     emit IArbitrable.Ruling(IArbitrator(arbitrator), disputeID, uint256(PermanentGTCR.Party.Challenger));
     vm.expectEmit(true, false, false, false, address(pgtcr));
-    emit PermanentGTCR.ItemStatusChange(itemID);
+    emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Absent);
     arbitrator.executeRuling(0);
     // item is now Absent because Challenger won
     (PermanentGTCR.Status status, , , , , , ) = pgtcr.items(itemID);
@@ -925,7 +949,7 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.expectEmit(true, true, false, true, address(token));
     emit IERC20.Transfer(address(pgtcr), alice, submissionMinDeposit);
     vm.expectEmit(true, false, false, false, address(pgtcr));
-    emit PermanentGTCR.ItemStatusChange(itemID);
+    emit PermanentGTCR.ItemStatusChange(itemID, PermanentGTCR.Status.Absent);
     arbitrator.executeRuling(0);
     
     (PermanentGTCR.Status status, uint128 arbitrationDeposit, uint120 challengeCount,
