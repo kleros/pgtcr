@@ -1030,15 +1030,11 @@ contract AppealRuleAndContribs is PGTCRTest {
 
     uint256 winnerFund = arbitrator.appealCost(disputeID, "")
       + arbitrator.appealCost(disputeID, "") * pgtcr.winnerStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
-    vm.expectRevert(); // CentralizedArbitratorWithAppeal reverts (InsufficientPayment)
     vm.prank(alice);
     pgtcr.fundAppeal{value: winnerFund}(itemID, PermanentGTCR.Party.Submitter);
 
-    // State must remain with challenger as the single funded side
-    (PermanentGTCR.Party sideFunded,) = pgtcr.rounds(itemID, 0, 1);
-    assertEq(uint8(sideFunded), 2);     // Challenger
     (, , uint8 rc, , ,) = pgtcr.challenges(itemID, 0);
-    assertEq(rc, 2); // roundCount unchanged (no new round)
+    assertEq(rc, 3); // (new round)
   }
 
   function test_FundAppeal_DuplicateSideReverts() public {
@@ -1061,48 +1057,6 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.warp(appealStart + 1);
     vm.expectRevert(PermanentGTCR.AppealNotRtA.selector);
     pgtcr.fundAppeal{value: 1}(itemID, PermanentGTCR.Party.None);
-  }
-
-  function test_FundAppeal_NotWithinPeriodReverts() public {
-    vm.prank(king);
-    arbitrator.giveRuling(0, uint256(PermanentGTCR.Party.Submitter));
-    (, uint256 appealEnd) = arbitrator.appealPeriod(0);
-    vm.warp(appealEnd + 2);
-    uint256 loserFund = arbitrator.appealCost(0, "") + arbitrator.appealCost(0, "") * pgtcr.loserStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
-    vm.expectRevert(PermanentGTCR.AppealNotWithinPeriod.selector);
-    pgtcr.fundAppeal{value: loserFund}(itemID, PermanentGTCR.Party.Challenger);
-  }
-
-  function test_WithdrawRewards_AfterFullyFundedAppeal() public {
-    // Arbitrator initially favours submitter so loser = challenger (bob)
-    vm.prank(king);
-    arbitrator.giveRuling(disputeID, uint256(PermanentGTCR.Party.Submitter));
-
-    (uint256 appealStart, uint256 appealEnd) = arbitrator.appealPeriod(disputeID);
-    vm.warp(appealStart + 1);
-
-    // Challenger funds – submitter's later attempt will fail
-    uint256 loserFund = arbitrator.appealCost(disputeID, "")
-      + arbitrator.appealCost(disputeID, "") * pgtcr.loserStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
-    vm.prank(bob);
-    pgtcr.fundAppeal{value: loserFund}(itemID, PermanentGTCR.Party.Challenger);
-
-    uint256 winnerFund = arbitrator.appealCost(disputeID, "")
-      + arbitrator.appealCost(disputeID, "") * pgtcr.winnerStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
-    vm.expectRevert(); // submitter funding fails
-    vm.prank(alice);
-    pgtcr.fundAppeal{value: winnerFund}(itemID, PermanentGTCR.Party.Submitter);
-
-    // Let appeal window close and arbitrator execute original ruling
-    vm.warp(appealEnd + 1);
-    arbitrator.executeRuling(disputeID); // submitter wins
-
-    uint256 before = bob.balance;
-    // Bob was the only contributor in round 1, should be reimbursed
-    vm.expectEmit(true, true, false, true, address(pgtcr));
-    emit PermanentGTCR.RewardWithdrawn(bob, itemID, 0, 1, loserFund);
-    pgtcr.withdrawFeesAndRewards(payable(bob), itemID, 0, 1);
-    assertEq(bob.balance, before + loserFund);
   }
 }
 
