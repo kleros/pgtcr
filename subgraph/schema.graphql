@@ -1,0 +1,206 @@
+enum Status {
+  "The item is not registered on the TCR."
+  Absent
+  "The item was submitted and is valid if it passes the submission period."
+  Submitted
+  "The item was included as the result of a dispute, and is valid if it passes the reinclusion period."
+  Reincluded
+  "The item is in the middle of a Dispute."
+  Disputed
+}
+
+enum Ruling {
+  "The arbitrator did not rule or refused to rule."
+  None
+  "The arbitrator ruled in favor of the requester."
+  Accept
+  "The arbitrator in favor of the challenger."
+  Reject
+}
+
+type Arbitrator @entity {
+  "The address of the arbitrator"
+  id: ID!
+}
+
+type Evidence @entity {
+  "itemID@tcrAddress-number"
+  id: ID!
+  "The arbitrator's address."
+  arbitrator: Bytes!
+  "The item"
+  item: Item!
+  "The address of the party that sent this piece of evidence."
+  party: Bytes!
+  "The URI of the evidence file."
+  URI: String!
+  "This is the <number>th evidence submitted (starting at 0) for <request>."
+  number: BigInt!
+  "When was this evidence posted"
+  timestamp: BigInt!
+  "Tx hash of the evidence submission"
+  txHash: Bytes!
+  metadata: EvidenceMetadata
+}
+
+type EvidenceMetadata @entity(immutable: true) {
+  id: ID!
+  "Name of the evidence"
+  name: String
+  "Title of the evidence"
+  title: String
+  "Description of the evidence"
+  description: String
+  "URI of the attached file"
+  fileURI: String
+  "File extension of the attached file"
+  fileTypeExtension: String
+}
+
+type Registry @entity {
+  "The registry address."
+  id: ID!
+  "The arbitration settings."
+  arbitrationSettings: [ArbitrationSetting!]! @derivedFrom(field: "registry")
+  "The number of arbitration setting changes."
+  arbitrationSettingCount: BigInt!
+  "The items on this list."
+  items: [Item!]! @derivedFrom(field: "registry")
+  "The requests (challenges!) created towards items on this list."
+  challenges: [Challenge!]! @derivedFrom(field: "registry")
+  "The total number of items in submitted OR reincluded state."
+  numberOfSubmitted: BigInt!
+  "The total number of items in absent state."
+  numberOfAbsent: BigInt!
+  "The total number of items in disputed state."
+  numberOfDisputed: BigInt!
+  "When this registry was created."
+  createdAt: BigInt!
+  "Arbitrator in use by this registry."
+  arbitrator: Arbitrator!
+  "ERC20 Token in use by this registry."
+  token: Bytes!
+  ""
+}
+
+type ArbitrationSetting @entity(immutable: true) {
+  "arbSettingId@tcrAddress"
+  id: ID!
+  "Registry these settings belong to"
+  registry: Registry!
+  "When it was created (or 0, if 1st one)"
+  timestamp: BigInt!
+  "Arbitrator extradata"
+  arbitratorExtraData: Bytes!
+  "MetaEvidence emitted for these settings"
+  metaEvidenceURI: String!
+  "Metadata associated with these settings (extracted from MetaEvidence)"
+  metadata: RegistryMetadata
+}
+
+type RegistryMetadata @entity(immutable: true) {
+ id: ID!
+ title: String
+ description: String
+ itemName: String
+ itemNamePlural: String
+ logoURI: String
+ requireRemovalEvidence: Boolean
+ arbitrationSetting: Registry @derivedFrom(field: "metadata")
+}
+
+type Item @entity(immutable: false) {
+  "The id of the item in the subgraph entity. Format: <itemID>@<tcrAddress>"
+  id: ID!
+  "The ID of the item in the registry. Also the keccak256 hash of the data."
+  itemID: Bytes!
+  "The link directing to data describing the item."
+  data: String!
+  "The current status of the item."
+  status: Status!
+  "List of submissions made for the item"
+  submissions: [Submission!]! @derivedFrom(field: "item")
+  "The total number of submissions for this item"
+  numberOfSubmissions: BigInt!
+  "List of challenges made for the item"
+  challenges: [Challenge!]! @derivedFrom(field: "item")
+  "The total number of challenges for this item."
+  numberOfChallenges: BigInt!
+  "The registry where this item was submitted."
+  registry: Registry!
+  "The address of the registry this item was submitted. Redundant with registry field to allow use in conditionals."
+  registryAddress: Bytes!
+  "Time when the item was FIRST submitted."
+  createdAt: BigInt!
+  "The time when the item was last submitted or reincluded."
+  includedAt: BigInt!
+  "The timestamp used to mark intent to withdraw the item."
+  withdrawingTimestamp: BigInt!
+  "The account that is CURRENTLY responsible for the item inclusion."
+  submitter: Bytes!
+  "The ERC20 stake CURRENTLY collateralizing the item"
+  stake: BigInt!
+  "The native token amount CURRENTLY collateralizing the item"
+  arbitrationDeposit: BigInt!
+  
+  metadata: LItemMetadata
+}
+
+"A submission is created whenever item is SUBMITTED, this is a subgraph-only concept to support rich history."
+type Submission @entity {
+  "<itemID>@<tcrAddress>-<submissionId>"
+  id: ID!
+  "Related item"
+  item: Item!
+  "The n of submissions of item at the time item was submitted before increment, starts at 0"
+  submissionId: BigInt!
+  "Time when submission was made"
+  createdAt: BigInt!
+  "The timestamp used to mark intent to withdraw the item."
+  withdrawingTimestamp: BigInt!
+  "The account that is responsible for the submission."
+  submitter: Bytes!
+  "The ERC20 deposit initially submitted with this submission. Might be different than current stake."
+  initialStake: BigInt!  # current stakes (of erc20 or native stake) are not tracked here, they can be tracked via the Challenge deposits
+  "The native token amount submitted with this submission. Cannot change during the course of the submission no matter what"
+  arbitrationDeposit: BigInt!
+}
+
+type Challenge @entity {
+  "<itemID>@<tcrAddress>-<challengeId>"
+  id: ID!
+  "The item this request belongs to."
+  item: Item!
+  "The number of existing challenges on the item at the time this challenge was created, starts at 0"
+  challengeId: BigInt!
+  "ID of the dispute"
+  disputeID: BigInt!
+  "Time when the challenge was made."
+  createdAt: BigInt!
+  "The hash of the transaction that created this challenge."
+  creationTx: Bytes!
+  "Submission at the time of the challenge"
+  submission: Submission!
+  "The address of the party that challenged the submission"
+  challenger: Bytes!
+  "The arbitration settings in use for this challenge"
+  arbitrationSetting: ArbitrationSetting!
+  "The ERC20 stake from submitter, that would be awarded to the challenger if challenge is successful, or returned to submitter if unsuccessful"
+  itemStake: BigInt!
+  "The ERC20 stake from challenger, that is returned to challenger if challenge is successful, or repurposed into collateralizing item if unsuccessful"
+  challengerStake: BigInt!
+  "The outcome of the dispute, if any. Note that unsuccessful appeal fundings can invert the arbitrator ruling (so this may differ from the ruling given by the arbitrator)."
+  disputeOutcome: Ruling!
+  "Tracks each round of a dispute in the form rounds[roundID]."
+  rounds: [Round!]! @derivedFrom(field: "challenge")
+  "The total number of rounds on this request."
+  numberOfRounds: BigInt!
+  "The registry where this request was submitted."
+  registry: Registry!
+  "The address of the registry this item was submitted. Redundant with registry field to allow use in conditionals."
+  registryAddress: Bytes!
+  "The time the challenge was resolved."
+  resolutionTime: BigInt!
+  "The hash of the transaction that solved this request."
+  resolutionTx: Bytes
+}
