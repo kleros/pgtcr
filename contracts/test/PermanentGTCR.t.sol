@@ -367,6 +367,14 @@ contract WithdrawItem is PGTCRTest {
     vm.expectRevert(PermanentGTCR.ItemWrongStatus.selector);
     pgtcr.withdrawItem(itemID);
   }
+
+  function test_CannotStartWithdrawTwice() public {
+    vm.prank(alice);
+    pgtcr.startWithdrawItem(itemID);
+    vm.prank(alice);
+    vm.expectRevert(PermanentGTCR.ItemWithdrawingAlready.selector);
+    pgtcr.startWithdrawItem(itemID);
+  }
 }
 
 contract ChallengeItem is PGTCRTest {
@@ -1005,6 +1013,50 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.prank(address(arbitrator));
     vm.expectRevert(PermanentGTCR.RulingInvalidOption.selector);
     pgtcr.rule(uint256(itemID), 69_420);
+  }
+
+  function test_FundAppeal_BothSidesFullyFund_NewRound() public {
+    // Arbitrator initially favours submitter so loser = challenger (bob)
+    vm.prank(king);
+    arbitrator.giveRuling(disputeID, uint256(PermanentGTCR.Party.Submitter));
+
+    (uint256 appealStart,) = arbitrator.appealPeriod(disputeID);
+    vm.warp(appealStart + 1); // inside loser window
+
+    uint256 loserFund = arbitrator.appealCost(disputeID, "")
+      + arbitrator.appealCost(disputeID, "") * pgtcr.loserStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
+    vm.prank(bob);
+    pgtcr.fundAppeal{value: loserFund}(itemID, PermanentGTCR.Party.Challenger);
+
+    uint256 winnerFund = arbitrator.appealCost(disputeID, "")
+      + arbitrator.appealCost(disputeID, "") * pgtcr.winnerStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
+    vm.prank(alice);
+    pgtcr.fundAppeal{value: winnerFund}(itemID, PermanentGTCR.Party.Submitter);
+
+    (, , uint8 rc, , ,) = pgtcr.challenges(itemID, 0);
+    assertEq(rc, 3); // (new round)
+  }
+
+  function test_FundAppeal_DuplicateSideReverts() public {
+    vm.prank(king);
+    arbitrator.giveRuling(0, uint256(PermanentGTCR.Party.Submitter));
+    (uint256 appealStart, ) = arbitrator.appealPeriod(0);
+    vm.warp(appealStart + 1);
+    uint256 winnerFund = arbitrator.appealCost(0, "") + arbitrator.appealCost(0, "") * pgtcr.winnerStakeMultiplier() / pgtcr.MULTIPLIER_DIVISOR();
+    vm.prank(alice);
+    pgtcr.fundAppeal{value: winnerFund}(itemID, PermanentGTCR.Party.Submitter);
+    vm.expectRevert(PermanentGTCR.AppealAlreadyFunded.selector);
+    vm.prank(alice);
+    pgtcr.fundAppeal{value: winnerFund}(itemID, PermanentGTCR.Party.Submitter);
+  }
+
+  function test_FundAppeal_PartyNoneReverts() public {
+    vm.prank(king);
+    arbitrator.giveRuling(0, uint256(PermanentGTCR.Party.Submitter));
+    (uint256 appealStart, ) = arbitrator.appealPeriod(0);
+    vm.warp(appealStart + 1);
+    vm.expectRevert(PermanentGTCR.AppealNotRtA.selector);
+    pgtcr.fundAppeal{value: 1}(itemID, PermanentGTCR.Party.None);
   }
 }
 
