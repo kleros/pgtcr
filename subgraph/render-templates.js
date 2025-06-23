@@ -11,6 +11,7 @@ const chainNameToChainId = {
 
 async function main() {
   const networkName = process.argv[2];
+  if (networkName === undefined) throw new Error("You need to pass chainId");
   const chainId = chainNameToChainId[networkName];
   const deployments = JSON.parse(fs.readFileSync('networks.json', 'utf8'));
   const { address: pgtcrFactory, startBlock: pgtcrFactoryStartBlock } =

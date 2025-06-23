@@ -273,6 +273,27 @@
   },
   {
     "type": "function",
+    "name": "getRoundAmountPaid",
+    "inputs": [
+      { "name": "_itemID", "type": "bytes32", "internalType": "bytes32" },
+      {
+        "name": "_challengeID",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      { "name": "_roundID", "type": "uint256", "internalType": "uint256" }
+    ],
+    "outputs": [
+      {
+        "name": "amountPaid",
+        "type": "uint256[3]",
+        "internalType": "uint256[3]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "governor",
     "inputs": [],
     "outputs": [{ "name": "", "type": "address", "internalType": "address" }],

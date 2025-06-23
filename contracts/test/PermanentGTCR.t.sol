@@ -853,10 +853,11 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.assertEq(uint8(sideFunded), 1); // Submitter
     vm.assertEq(feeRewards, loserAppealFund);
 
-    // i don't know how to access this; without it being cumbersome, so i wont.
-    // vm.assertEq(amountPaid[0], 0);
-    // vm.assertEq(amountPaid[1], loserAppealFund);
-    // vm.assertEq(amountPaid[2], 0);
+    uint256[3] memory amountPaid = pgtcr.getRoundAmountPaid(itemID, 0, 1);
+
+    vm.assertEq(amountPaid[0], 0);
+    vm.assertEq(amountPaid[1], loserAppealFund);
+    vm.assertEq(amountPaid[2], 0);
 
     vm.warp(appealEnd + 1); // get out of period. Alice wins by default because Bob side desisted to fund appeal
 
@@ -920,10 +921,11 @@ contract AppealRuleAndContribs is PGTCRTest {
     vm.assertEq(uint8(sideFunded), 2); // Challenger (Bob) funded fully
     vm.assertEq(feeRewards, loserAppealFund + winnerAppealFund / 2);
 
-    // i don't know how to access this; without it being cumbersome, so i wont.
-    // vm.assertEq(amountPaid[0], 0);
-    // vm.assertEq(amountPaid[1], winnerAppealFund / 2);
-    // vm.assertEq(amountPaid[2], loserAppealFund);
+    uint256[3] memory amountPaid = pgtcr.getRoundAmountPaid(itemID, 0, 1);
+
+    vm.assertEq(amountPaid[0], 0);
+    vm.assertEq(amountPaid[1], winnerAppealFund / 2);
+    vm.assertEq(amountPaid[2], loserAppealFund);
 
     vm.warp(appealEnd + 1); // get out of period. Bob wins by default because Alice side didnt fund fully
 

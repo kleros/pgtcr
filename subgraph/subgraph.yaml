@@ -11,9 +11,9 @@ dataSources:
     name: PermanentGTCRFactory
     network: gnosis
     source:
-      address: "0x08e58Bc26CFB0d346bABD253A1799866F269805a"
+      address: "0x64448588A47c0962F08127D7F12Affb11E2dDf34"
       abi: PermanentGTCRFactory
-      startBlock: 19592773
+      startBlock: 40718644
     mapping:
       kind: ethereum/events
       apiVersion: 0.0.9

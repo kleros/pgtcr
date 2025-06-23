@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  *  @authors: [@greenlucid]
  *  @reviewers: [@fcanela, @jaybuidl, @mani99brar]
@@ -15,7 +17,7 @@ import {SafeSend} from "./SafeSend.sol";
 import {IArbitrable, IArbitrator} from "@kleros/erc-792/contracts/IArbitrator.sol";
 import {IEvidence} from "@kleros/erc-792/contracts/erc-1497/IEvidence.sol";
 
-// It is the user responsibility to accept ETH. It is the ERC20 token responsibility to not revert transfers.
+// It is the ERC20 token responsibility to not revert transfers.
 // ERC20 token are not trusted to not revert on transfers from Contract -> Beneficiary.
 // > If the token reverts on valid transfers from Contract to a beneficiary, those funds are forever locked.
 // > otherwise Item would get stuck in Disputed, and all appeal contributions would get stuck.
@@ -103,11 +105,6 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     uint256 public submissionPeriod; // The time after which a new item is considered valid. Only matters offchain.
     uint256 public reinclusionPeriod; // The time after which an item ruled to be accepted is considered valid. Only matters offchain.
     uint256 public withdrawingPeriod; // The time after which an item can be withdrawn
-
-    // If this is lower, equal, or only slightly larger than withdrawingPeriod, the registry governor
-    // can make all included items invalid before they get a chance to withdraw, potentially causing all of
-    // them to get challenged and removed from the registry, losing funds.
-    // Contract enforces withdrawingPeriod to be lower than half the cooldown.
     uint256 public arbitrationParamsCooldown; // Seconds until new arbitrationParams are enforced in all items, governor cannot change it.
 
     // Multipliers are in basis points.
@@ -118,7 +115,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     uint256 public constant MULTIPLIER_DIVISOR = 10000; // Divisor parameter for multipliers.
 
     mapping(bytes32 => Item) public items; // Maps the item ID to its data in the form items[_itemID].
-    mapping(bytes32 => mapping(uint256 => Challenge)) public challenges; // List of challenges, made against the item in the form challenge[itemID][challengeID].
+    mapping(bytes32 => mapping(uint256 => Challenge)) public challenges; // List of challenges, made against the item in the form challenges[itemID][challengeID].
     mapping(bytes32 => mapping(uint256 => mapping(uint256 => Round))) public rounds; // Data of the different dispute rounds. rounds[itemID][challengeID][roundId].
     mapping(bytes32 => mapping(
         uint256 => mapping(uint256 => mapping(address => uint256[3])))
@@ -200,6 +197,7 @@ contract PermanentGTCR is IArbitrable, IEvidence {
     /** 
      * @dev PGTCR is deployed only once per chain, new instances are created with minimal proxy from the factory.
      *  This is only needed to set the wrapped native token, which is used in SafeSend.
+     * @param _wNative The Wrapped Native Token on this chain.
      */
     constructor(address _wNative) {
         W_NATIVE = _wNative;
@@ -771,6 +769,22 @@ contract PermanentGTCR is IArbitrable, IEvidence {
         if (contribution > 0) {
             emit Contribution(_itemID, _challengeID, _roundID, _contributor, contribution, Party(_side));
         }
+    }
+
+    /* Views */
+
+    /**
+     * @dev Exposes the otherwise unaccessible round.amountPaid field, useful in tests and subgraph
+     * @param _itemID s.e
+     * @param _challengeID s.e
+     * @param _roundID s.e
+     */
+    function getRoundAmountPaid(
+        bytes32 _itemID,
+        uint256 _challengeID,
+        uint256 _roundID
+    ) external view returns (uint256[3] memory amountPaid) {
+        amountPaid = rounds[_itemID][_challengeID][_roundID].amountPaid;
     }
 
     /* Errors */
