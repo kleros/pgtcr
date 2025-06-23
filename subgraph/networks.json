@@ -1,0 +1,9 @@
+{
+  "PermanentGTCRFactory": {
+    "100": {
+      "address": "0x64448588A47c0962F08127D7F12Affb11E2dDf34",
+      "transactionHash": "0xe2fd402a5ecd89661fd4109d3494e70699b8a75a24fc4904f7208870c13693c7",
+      "startBlock": 40718644
+    }
+  }
+}

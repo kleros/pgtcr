@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MIT
+
 /**
  *  @authors: [@greenlucid]
  *  @reviewers: [@fcanela, @jaybuidl, @kokialgo]
@@ -85,6 +87,7 @@ contract PermanentGTCRFactory {
      * @dev Deploys and returns the address of a clone that mimics the behaviour of `GTCR`.
      * @param _implementation Address of the contract to clone.
      * This function uses the create opcode, which should never revert.
+     * @return instance Address the instance was deployed at.
      */
     function clone(address _implementation) internal returns (PermanentGTCR instance) {
         assembly {

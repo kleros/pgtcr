@@ -1,0 +1,135 @@
+specVersion: 1.3.0
+indexerHints:
+  prune: auto
+features:
+  - fullTextSearch
+  - ipfsOnEthereumContracts
+schema:
+  file: ./schema.graphql
+dataSources:
+  - kind: ethereum
+    name: PermanentGTCRFactory
+    network: {{network}}
+    source:
+      address: "{{PermanentGTCRFactory.address}}"
+      abi: PermanentGTCRFactory
+      startBlock: {{PermanentGTCRFactory.startBlock}}
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - MetaEvidence
+        - Registry
+      abis:
+        - name: PermanentGTCRFactory
+          file: ./abis/PermanentGTCRFactory.json
+      eventHandlers:
+        - event: NewGTCR(indexed address)
+          handler: handleNewGTCR
+      file: ./src/pgtcr-factory.ts
+templates:
+  - kind: ethereum/contract
+    name: PermanentGTCR
+    network: {{network}}
+    source:
+      abi: PermanentGTCR
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Item
+        - ItemProp
+        - Request
+        - Round
+        - Registry
+        - MetaEvidence
+        - Arbitrator
+        - Contribution
+      abis:
+        - name: PermanentGTCR
+          file: ./abis/PermanentGTCR.json
+        - name: IArbitrator
+          file: ./abis/IArbitrator.json
+      eventHandlers:
+        - event: NewItem(indexed bytes32,string)
+          handler: handleNewItem
+        - event: ItemStatusChange(indexed bytes32,uint8)
+          handler: handleStatusChange
+        - event: ItemStartsWithdrawing(indexed bytes32)
+          handler: handleItemStartsWithdrawing
+        - event: Dispute(indexed address,indexed uint256,uint256,uint256)
+          handler: handleDispute
+        - event: Ruling(indexed address,indexed uint256,uint256)
+          handler: handleRuling
+        - event: Contribution(indexed bytes32,uint256,uint256,indexed address,uint256,uint8)
+          handler: handleContribution
+        - event: RewardWithdrawn(indexed address,indexed bytes32,uint256,uint256,uint256)
+          handler: handleRewardWithdrawn
+        - event: SettingsUpdated()
+          handler: handleSettingsUpdated
+        - event: MetaEvidence(indexed uint256,string)
+          handler: handleMetaEvidence
+        - event: Evidence(indexed address,indexed uint256,indexed address,string)
+          handler: handleEvidence
+      file: ./src/pgtcr.ts
+  - kind: ethereum/contract
+    name: IArbitrator
+    network: {{network}}
+    source:
+      abi: IArbitrator
+    mapping:
+      kind: ethereum/events
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      entities:
+        - Arbitrator
+      abis:
+        - name: IArbitrator
+          file: ./abis/IArbitrator.json
+        - name: PermanentGTCR
+          file: ./abis/PermanentGTCR.json
+      eventHandlers:
+        - event: AppealPossible(indexed uint256,indexed address)
+          handler: handleAppealPossible
+        - event: AppealDecision(indexed uint256,indexed address)
+          handler: handleAppealDecision
+      file: ./src/pgtcr.ts
+  - kind: file/ipfs
+    name: EvidenceFile
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/pgtcr.ts
+      handler: handleEvidenceFile
+      entities:
+        - EvidenceFile
+      abis:
+        - name: PermanentGTCR
+          file: ./abis/PermanentGTCR.json
+  - kind: file/ipfs
+    name: ItemFile
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/pgtcr.ts
+      handler: handleItemFile
+      entities:
+        - ItemFile
+        - ItemProp
+      abis:
+        - name: PermanentGTCR
+          file: ./abis/PermanentGTCR.json
+  - kind: file/ipfs
+    name: RegistryMetadata
+    mapping:
+      apiVersion: 0.0.9
+      language: wasm/assemblyscript
+      file: ./src/pgtcr.ts
+      handler: handleRegistryMetadata
+      entities:
+        - RegistryMetadata
+      abis:
+        - name: PermanentGTCR
+          file: ./abis/PermanentGTCR.json
