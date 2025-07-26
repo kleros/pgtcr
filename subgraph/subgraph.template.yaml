@@ -24,6 +24,8 @@ dataSources:
       abis:
         - name: PermanentGTCRFactory
           file: ./abis/PermanentGTCRFactory.json
+        - name: PermanentGTCR
+          file: ./abis/PermanentGTCR.json
       eventHandlers:
         - event: NewGTCR(indexed address)
           handler: handleNewGTCR
@@ -97,26 +99,26 @@ templates:
           handler: handleAppealDecision
       file: ./src/pgtcr.ts
   - kind: file/ipfs
-    name: EvidenceFile
+    name: EvidenceMetadata
     mapping:
       apiVersion: 0.0.9
       language: wasm/assemblyscript
-      file: ./src/pgtcr.ts
-      handler: handleEvidenceFile
+      file: ./src//fileHandlers/EvidenceMetadataHandler.ts
+      handler: handleEvidenceMetadata
       entities:
-        - EvidenceFile
+        - EvidenceMetadata
       abis:
         - name: PermanentGTCR
           file: ./abis/PermanentGTCR.json
   - kind: file/ipfs
-    name: ItemFile
+    name: ItemMetadata
     mapping:
       apiVersion: 0.0.9
       language: wasm/assemblyscript
-      file: ./src/pgtcr.ts
-      handler: handleItemFile
+      file: ./src//fileHandlers/ItemMetadataHandler.ts
+      handler: handleItemMetadata
       entities:
-        - ItemFile
+        - ItemMetadata
         - ItemProp
       abis:
         - name: PermanentGTCR
@@ -126,7 +128,7 @@ templates:
     mapping:
       apiVersion: 0.0.9
       language: wasm/assemblyscript
-      file: ./src/pgtcr.ts
+      file: ./src/fileHandlers/RegistryMetadataHandler.ts
       handler: handleRegistryMetadata
       entities:
         - RegistryMetadata

@@ -79,6 +79,7 @@ export function handleNewItem(event: NewItem): void {
   item.status = SUBMITTED;
   item.numberOfSubmissions = ONE; // this subm is added later on this handler.
   item.numberOfChallenges = ZERO;
+  item.numberOfEvidences = ZERO;
   item.registry = registry.id;
   item.registryAddress = event.address;
   item.createdAt = event.block.timestamp;
@@ -91,7 +92,7 @@ export function handleNewItem(event: NewItem): void {
 
   // Extract IPFS hash for metadata, if available
   const ipfsHash = extractPath(event.params._data);
-  item.metadata = ipfsHash ? ipfsHash : null;
+  item.metadata = ipfsHash ? (ipfsHash + "-" + graphItemID) : null;
 
   log.debug('Creating datasource for ipfs hash : {}', [ipfsHash]);
   
@@ -107,6 +108,7 @@ export function handleNewItem(event: NewItem): void {
   submission.item = item.id;
   submission.submissionID = ZERO;
   submission.createdAt = event.block.timestamp;
+  submission.creationTx = event.transaction.hash;
   submission.withdrawingTimestamp = ZERO;
   submission.submitter = event.transaction.from;
   submission.initialStake = __itemsRes.getStake();
@@ -130,6 +132,7 @@ export function handleStatusChange(event: ItemStatusChange): void {
     submission.item = item.id;
     submission.submissionID = item.numberOfSubmissions;
     submission.createdAt = event.block.timestamp;
+    submission.creationTx = event.transaction.hash;
     submission.withdrawingTimestamp = ZERO;
     submission.submitter = event.transaction.from;
     let __itemsRes: PermanentGTCR__itemsResult = pgtcr.items(event.params._itemID);
@@ -156,6 +159,9 @@ export function handleStatusChange(event: ItemStatusChange): void {
       registry.numberOfSubmitted = registry.numberOfSubmitted.minus(ONE);
     }
     registry.numberOfAbsent = registry.numberOfAbsent.plus(ONE);
+    let submission = Submission.load(graphItemID + "-" + item.numberOfSubmissions.minus(ONE).toString()) as Submission;
+    submission.finishedAt = event.block.timestamp;
+    submission.save();
   } else if (event.params._status === REINCLUDED_CODE) {
     item.includedAt = event.block.timestamp;
     // stake was handled in Ruling. withdrawingTimestamp is known to be ZERO, arbDeposit, submitter are unchanged...
@@ -185,6 +191,7 @@ export function handleItemStartsWithdrawing(event: ItemStartsWithdrawing): void 
   item.withdrawingTimestamp = event.block.timestamp;
   let submission = Submission.load(graphItemID + "-" + item.numberOfSubmissions.minus(ONE).toString()) as Submission;
   submission.withdrawingTimestamp = event.block.timestamp;
+  submission.withdrawingTx = event.transaction.hash;
   submission.save();
   item.save();
 }
@@ -199,7 +206,6 @@ export function handleDispute(event: Dispute): void {
 
   let challengeID = item.numberOfChallenges;
   let challenge = new Challenge(graphItemID + '-' + challengeID.toString());
-
   item.numberOfChallenges = item.numberOfChallenges.plus(ONE);
 
   challenge.item = item.id;
@@ -220,6 +226,7 @@ export function handleDispute(event: Dispute): void {
 
   let newRoundID = challenge.id + '-1'; // When a dispute is created, the new round is always id 1
   let round = buildNewRound(newRoundID, challenge.id, event.block.timestamp);
+  item.save();
   round.save();
   challenge.save();
 }
@@ -231,9 +238,15 @@ export function handleAppealPossible(event: AppealPossible): void {
   let itemID = pgtcr.disputeIDToItemID(event.params._disputeID);
   
   // get item, current challenge and current round.
-  let graphItemID = itemID.toHexString() + '@' + event.address.toHexString();
-  let item = Item.load(graphItemID) as Item;
-  let challenge = Challenge.load(graphItemID + "-" + item.numberOfChallenges.minus(ONE).toString()) as Challenge;
+  let graphItemID = itemID.toHexString() + '@' + event.params._arbitrable.toHexString();
+  let item = Item.load(graphItemID);
+  if (item == null) {
+    return;
+  }
+  let challenge = Challenge.load(graphItemID + "-" + item.numberOfChallenges.minus(ONE).toString());
+  if (challenge == null) {
+    return;
+  }
   let round = Round.load(challenge.id + "-" + challenge.numberOfRounds.minus(ONE).toString()) as Round;
   
   let arbitrator = IArbitrator.bind(event.address);
@@ -241,7 +254,7 @@ export function handleAppealPossible(event: AppealPossible): void {
   round.appealPeriodStart = appealPeriod.getStart();
   round.appealPeriodEnd = appealPeriod.getEnd();
   let currentRuling = arbitrator.currentRuling(event.params._disputeID);
-  round.ruling = CONTRACT_STATUS_NAMES.get(currentRuling.toU32());
+  round.ruling = RULING_NAMES.get(currentRuling.toU32());
   round.rulingTime = event.block.timestamp;
   round.txHashAppealPossible = event.transaction.hash;
   round.save();
@@ -254,7 +267,7 @@ export function handleAppealDecision(event: AppealDecision): void {
   let itemID = pgtcr.disputeIDToItemID(event.params._disputeID);
   
   // get item, current challenge and current round.
-  let graphItemID = itemID.toHexString() + '@' + event.address.toHexString();
+  let graphItemID = itemID.toHexString() + '@' + event.params._arbitrable.toHexString();
   let item = Item.load(graphItemID) as Item;
   let challenge = Challenge.load(graphItemID + "-" + item.numberOfChallenges.minus(ONE).toString()) as Challenge;
   let round = Round.load(challenge.id + "-" + challenge.numberOfRounds.minus(ONE).toString()) as Round;
@@ -330,7 +343,7 @@ export function handleRuling(event: Ruling): void {
   if (challenge.disputeOutcome === ACCEPT) {
     // update item stake, nothing else. must be done here instead of update status,
     // since Ruling => Accept but item.withdrawingTimestamp is a possibility
-    item.stake = challenge.itemStake.plus(item.stake);
+    item.stake = challenge.challengerStake.plus(challenge.itemStake);
     item.save();
   }
   // Paste and slightly adapted from kleros/gtcr-subgraph
@@ -482,11 +495,12 @@ export function handleMetaEvidence(event: MetaEvidence): void {
   const context = new DataSourceContext();
   context.setString('address', event.address.toHexString());
   context.setBigInt('count', registry.arbitrationSettingCount);
+
   RegistryMetadataTemplate.createWithContext(ipfsHash, context);
+  arbitrationSetting.metadata = event.address.toHexString() + "-" + registry.arbitrationSettingCount.toString();
 
   // this is done last deliberately.
   registry.arbitrationSettingCount = registry.arbitrationSettingCount.plus(ONE);
-
   arbitrationSetting.save();
   registry.save();
 }
@@ -505,6 +519,7 @@ export function handleEvidence(event: EvidenceEvent): void {
   evidence.number = evidenceNumber;
   evidence.timestamp = event.block.timestamp;
   evidence.txHash = event.transaction.hash;
+  evidence.item = graphItemID;
 
   const ipfsHash = extractPath(event.params._evidence);
   evidence.metadata = `${ipfsHash}-${evidence.id}`;
@@ -513,6 +528,7 @@ export function handleEvidence(event: EvidenceEvent): void {
   context.setString('evidenceId', evidence.id);
   EvidenceMetadataTemplate.createWithContext(ipfsHash, context);
 
+  item.save();
   evidence.save();
 }
 

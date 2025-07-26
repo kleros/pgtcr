@@ -121,6 +121,7 @@ type RegistryMetadata @entity(immutable: true) {
  description: String
  itemName: String
  itemNamePlural: String
+ policyURI: String
  logoURI: String
  requireRemovalEvidence: Boolean
  arbitrationSetting: ArbitrationSetting @derivedFrom(field: "metadata")
@@ -222,8 +223,14 @@ type Submission @entity(immutable: false) {
   submissionID: BigInt!
   "Time when submission was made"
   createdAt: BigInt!
+  "Tx when submission was made"
+  creationTx: Bytes!
+  "Time when submission was finished"
+  finishedAt: BigInt
   "The timestamp used to mark intent to withdraw the item."
   withdrawingTimestamp: BigInt!
+  "The tx hash of the tx used to mark intent to withdraw the item."
+  withdrawingTx: Bytes
   "The account that is responsible for the submission."
   submitter: Bytes!
   "The ERC20 deposit initially submitted with this submission. Might be different than current stake."

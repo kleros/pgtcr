@@ -8,7 +8,7 @@ import { PermanentGTCR } from '../generated/templates/PermanentGTCR/PermanentGTC
 export function handleNewGTCR(event: NewGTCR): void {
   PGTCRDataSource.create(event.params._address);
   let registry = new Registry(event.params._address.toHexString());
-  let pgtcr = PermanentGTCR.bind(event.address);
+  let pgtcr = PermanentGTCR.bind(event.params._address);
 
   // we dont create arbsetting here! goto handleMetaEvidence in pgtcr.ts
   let arbitratorAddress = pgtcr.arbitrator();
