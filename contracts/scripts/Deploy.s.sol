@@ -13,8 +13,8 @@ contract Deploy is Script {
         uint256 deployerPrivateKey = vm.envUint("PRIVATE_KEY");
         vm.startBroadcast(deployerPrivateKey);
         
-        // wxdai
-        address W_NATIVE = 0x4ED2addA46A7e24d06CE1BaACC6a4b69c1FAB404;
+        // weth
+        address W_NATIVE = 0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2;
 
         PermanentGTCR template = new PermanentGTCR(W_NATIVE);
         PermanentGTCRFactory factory = new PermanentGTCRFactory(address(template));
