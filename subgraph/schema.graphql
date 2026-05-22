@@ -227,6 +227,8 @@ type Submission @entity(immutable: false) {
   creationTx: Bytes!
   "Time when submission was finished"
   finishedAt: BigInt
+  "The tx hash of the tx that finished this submission (e.g. the withdrawItem() tx that completes a withdrawal, or the ruling tx that removes the item)."
+  finishedTx: Bytes
   "The timestamp used to mark intent to withdraw the item."
   withdrawingTimestamp: BigInt!
   "The tx hash of the tx used to mark intent to withdraw the item."

@@ -161,6 +161,9 @@ export function handleStatusChange(event: ItemStatusChange): void {
     registry.numberOfAbsent = registry.numberOfAbsent.plus(ONE);
     let submission = Submission.load(graphItemID + "-" + item.numberOfSubmissions.minus(ONE).toString()) as Submission;
     submission.finishedAt = event.block.timestamp;
+    // The tx that finished this submission. For a voluntary withdrawal this is the withdrawItem() tx,
+    // which is distinct from withdrawingTx (the startWithdrawItem() tx). For a dispute removal it's the ruling tx.
+    submission.finishedTx = event.transaction.hash;
     submission.save();
   } else if (event.params._status === REINCLUDED_CODE) {
     item.includedAt = event.block.timestamp;
